@@ -31,6 +31,9 @@ pub struct Response {
     pub ok: bool,
     /// Output on success, error message on failure.
     pub out: String,
+    /// Side notes for the caller (e.g. lane switches); printed to stderr so stdout stays clean.
+    #[serde(default)]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

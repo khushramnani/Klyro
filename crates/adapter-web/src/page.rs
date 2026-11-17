@@ -13,8 +13,8 @@ const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct WebPage {
     engine: Engine,
-    cdp: Cdp,
-    refs: RefMap<Handle>,
+    pub(crate) cdp: Cdp,
+    pub(crate) refs: RefMap<Handle>,
     main_frame: String,
     // Declared last so the connection closes before the process is stopped.
     _proc: Proc,
@@ -44,7 +44,7 @@ impl WebPage {
         self.engine
     }
 
-    fn eval(&mut self, expr: &str) -> Result<Value> {
+    pub(crate) fn eval(&mut self, expr: &str) -> Result<Value> {
         let r = self.cdp.call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true }))?;
         if let Some(ex) = r.get("exceptionDetails") {
             return Err(Error::Engine(format!("page script error: {}", ex["text"].as_str().unwrap_or("?"))));
@@ -136,7 +136,7 @@ impl WebPage {
                 return Ok(());
             }
             if Instant::now() >= end {
-                return Err(Error::Engine(format!("timed out after {}s waiting for {what}", timeout.as_secs_f32())));
+                return Err(Error::Timeout(format!("timed out after {}s waiting for {what}", timeout.as_secs_f32())));
             }
             std::thread::sleep(Duration::from_millis(100));
         }

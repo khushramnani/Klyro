@@ -1,9 +1,11 @@
 //! Klyro daemon: keeps browser sessions alive between CLI calls.
 
 pub mod ipc;
+pub mod router;
 
 use ipc::{Info, Request, Response};
-use klyro_adapter_web::{Engine, WebPage};
+use klyro_adapter_web::Engine;
+use router::Router;
 use klyro_core::{Action, Adapter, ScreenshotOptions, Wait};
 use std::time::Duration;
 use std::collections::HashMap;
@@ -11,7 +13,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
-type Session = Arc<Mutex<Box<dyn Adapter + Send>>>;
+type Session = Arc<Mutex<Router>>;
 type Sessions = Arc<Mutex<HashMap<String, Session>>>;
 
 /// Runs until the last session closes.
@@ -55,7 +57,7 @@ fn handle(stream: TcpStream, token: &str, sessions: &Sessions) -> io::Result<()>
 }
 
 fn err(m: impl Into<String>) -> Response {
-    Response { ok: false, out: m.into() }
+    Response { ok: false, out: m.into(), notes: vec![] }
 }
 
 /// Returns the response and whether the daemon should exit afterwards.
@@ -76,6 +78,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
             None => Err("press needs a key".into()),
         },
         "text" => with_session(req, sessions, |a| a.text()),
+        "status" => with_session(req, sessions, |a| Ok(a.status())),
         "screenshot" => screenshot(req, sessions),
         "wait" => wait(req, sessions),
         "close" => {
@@ -92,12 +95,17 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
         }
         other => Err(format!("unknown command {other}")),
     };
-    (to_response(result), false)
+    let mut resp = to_response(result);
+    // Lane switches caused by this command, shown to the caller.
+    if let Some(s) = sessions.lock().unwrap().get(&req.session).cloned() {
+        resp.notes = s.lock().unwrap().take_notes();
+    }
+    (resp, false)
 }
 
 fn to_response(r: Result<String, String>) -> Response {
     match r {
-        Ok(out) => Response { ok: true, out },
+        Ok(out) => Response { ok: true, out, notes: vec![] },
         Err(e) => err(e),
     }
 }
@@ -108,8 +116,8 @@ fn no_session(name: &str) -> String {
 
 fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
     let url = normalize_url(req.args.first().ok_or("open needs a URL")?);
-    // ponytail: Chromium until the router (Task 8) picks the lane.
-    let engine: Engine = req.engine.as_deref().unwrap_or("chromium").parse()?;
+    // No --engine: the router picks lanes automatically.
+    let engine: Option<Engine> = req.engine.as_deref().map(str::parse).transpose()?;
     let mut created = false;
     let session = {
         let mut map = sessions.lock().unwrap();
@@ -118,7 +126,7 @@ fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
             None => {
                 created = true;
                 // ponytail: launches while holding the map lock (about a second); per-session init if that hurts.
-                let s: Session = Arc::new(Mutex::new(Box::new(WebPage::launch(engine, req.headed).map_err(|e| e.to_string())?)));
+                let s: Session = Arc::new(Mutex::new(Router::start(engine, req.headed).map_err(|e| e.to_string())?));
                 map.insert(req.session.clone(), s.clone());
                 s
             }
@@ -196,7 +204,7 @@ fn wait(req: &Request, sessions: &Sessions) -> Result<String, String> {
 fn with_session<T>(
     req: &Request,
     sessions: &Sessions,
-    f: impl FnOnce(&mut Box<dyn Adapter + Send>) -> klyro_core::Result<T>,
+    f: impl FnOnce(&mut Router) -> klyro_core::Result<T>,
 ) -> Result<T, String> {
     let s = sessions.lock().unwrap().get(&req.session).cloned().ok_or_else(|| no_session(&req.session))?;
     let mut a = s.lock().unwrap();

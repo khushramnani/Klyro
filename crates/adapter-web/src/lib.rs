@@ -4,6 +4,7 @@ mod ax;
 mod cdp;
 mod chromium;
 mod engine;
+mod handoff;
 mod keys;
 mod lightpanda;
 mod page;

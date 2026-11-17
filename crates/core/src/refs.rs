@@ -29,6 +29,16 @@ impl<H: Clone + Eq + Hash> RefMap<H> {
         Self::default()
     }
 
+    /// Numbering continues from another map, so its old refs can never name a new element.
+    pub fn starting_at(next: u32) -> Self {
+        RefMap { next, ..Self::default() }
+    }
+
+    /// The number the next new ref will get.
+    pub fn next_index(&self) -> u32 {
+        self.next
+    }
+
     /// Start a new snapshot. Call `assign` for each element, then `finish`.
     pub fn begin(&mut self) {
         self.pending = Some(HashMap::new());
@@ -94,6 +104,14 @@ mod tests {
         snap(&mut m, &[20, 40]);
         assert_eq!(m.resolve("e1"), Err(Error::StaleRef("e1".into())));
         assert_eq!(m.resolve("e3").unwrap(), 40);
+    }
+
+    #[test]
+    fn starting_at_continues_numbering() {
+        let mut m = RefMap::<u32>::starting_at(7);
+        assert_eq!(snap(&mut m, &[1]), ["e7"]);
+        assert_eq!(m.next_index(), 8);
+        assert!(matches!(m.resolve("e1"), Err(Error::UnknownRef(_))));
     }
 
     #[test]

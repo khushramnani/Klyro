@@ -53,6 +53,10 @@ pub(crate) fn start(headed: bool) -> Result<(Proc, String)> {
         // Chrome throttles pages it thinks are in the background (screenshots then hang under
         // load); an automated page is never in the background. Same defaults as Puppeteer.
         .args(["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"])
+        // A throwaway profile needs no component downloads, sync or extensions (each fresh
+        // profile otherwise pulls ~150 MB of models and lists). Same defaults as Puppeteer.
+        .args(["--disable-background-networking", "--disable-component-update", "--disable-default-apps",
+               "--disable-extensions", "--disable-sync", "--no-pings", "--metrics-recording-only"])
         .arg(format!("--user-data-dir={}", profile.display()))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -63,7 +67,14 @@ pub(crate) fn start(headed: bool) -> Result<(Proc, String)> {
     }
     let child = cmd.spawn().map_err(|e| engine_err(format!("could not start {}: {e}", exe.display())))?;
     let mut proc = Proc::new(child, move || {
-        let _ = std::fs::remove_dir_all(&profile_dir);
+        // Windows keeps files locked briefly after Chrome exits; retry instead of leaking the profile.
+        for _ in 0..20 {
+            if std::fs::remove_dir_all(&profile_dir).is_ok() || !profile_dir.exists() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        eprintln!("could not remove {}", profile_dir.display());
     });
     let ws = wait_for_port(&mut proc, &profile, &exe)?;
     Ok((proc, ws))

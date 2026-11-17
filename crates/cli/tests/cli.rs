@@ -161,3 +161,23 @@ fn screenshot_is_unsupported_on_lightpanda() {
     let err = k.fails(&["screenshot", k.home.join("x.png").to_str().unwrap()]);
     assert!(err.contains("not supported here"), "{err}");
 }
+
+#[test]
+fn status_shows_lane_and_switch_note() {
+    if !have_lightpanda() {
+        return;
+    }
+    let app = demo_app();
+    let k = Klyro::with_engine("status", "");
+    k.ok(&["open", &format!("{app}/login")]);
+    assert!(k.ok(&["status"]).contains("lane: lightpanda (auto)"));
+
+    let shot = k.home.join("s.png");
+    let (ok, out, err) = k.run(&["screenshot", shot.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    assert!(out.starts_with("saved "), "stdout stays clean: {out}");
+    assert!(err.contains("note: switched lane: lightpanda -> chromium: screenshot needs it"), "{err}");
+
+    let status = k.ok(&["status"]);
+    assert!(status.contains("lane: chromium (auto)") && status.contains("screenshot needs it"), "{status}");
+}

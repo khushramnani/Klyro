@@ -28,7 +28,8 @@ enum Cmd {
         /// Show a real browser window, to watch or debug. Only applies when the session starts.
         #[arg(long)]
         headed: bool,
-        /// Browser engine: chromium (visual) or lightpanda (fast, no pixels). Only applies when the session starts.
+        /// Pin the engine: chromium (visual) or lightpanda (fast, no pixels). Default: automatic,
+        /// starting on lightpanda when available. Only applies when the session starts.
         #[arg(long, env = "KLYRO_ENGINE")]
         engine: Option<String>,
     },
@@ -79,6 +80,8 @@ enum Cmd {
         #[arg(long, default_value_t = 10_000)]
         timeout: u64,
     },
+    /// Show the session's lane (engine) and every lane switch with its reason.
+    Status,
     /// Close the session and its browser.
     Close,
     /// Run the background daemon (started automatically).
@@ -130,18 +133,23 @@ fn main() -> ExitCode {
             };
             ("wait", vec![kind.into(), value, timeout.to_string()])
         }
+        Cmd::Status => ("status", vec![]),
         Cmd::Close => ("close", vec![]),
     };
     let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed, engine };
     // Only `open` may start a daemon; other commands need an existing session anyway.
     match send(req, cmd == "open") {
-        Ok(Response { ok: true, out }) => {
-            println!("{out}");
-            ExitCode::SUCCESS
-        }
-        Ok(Response { ok: false, out }) => {
-            eprintln!("error: {out}");
-            ExitCode::FAILURE
+        Ok(Response { ok, out, notes }) => {
+            for n in notes {
+                eprintln!("note: switched lane: {n}");
+            }
+            if ok {
+                println!("{out}");
+                ExitCode::SUCCESS
+            } else {
+                eprintln!("error: {out}");
+                ExitCode::FAILURE
+            }
         }
         Err(e) => {
             eprintln!("error: {e}");
@@ -155,7 +163,7 @@ fn send(req: Request, may_start: bool) -> Result<Response, String> {
         return r;
     }
     if !may_start {
-        return Ok(Response { ok: false, out: format!("no session '{}': run `klyro open <url>` first", req.session) });
+        return Ok(Response { ok: false, out: format!("no session '{}': run `klyro open <url>` first", req.session), notes: vec![] });
     }
     start_daemon()?;
     let end = Instant::now() + Duration::from_secs(10);
