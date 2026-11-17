@@ -14,6 +14,9 @@ pub enum Error {
     Unsupported(&'static str),
     /// A wait condition did not happen in time. A normal answer, not an engine fault.
     Timeout(String),
+    /// The request itself is wrong (bad key name, filling a non-field, missing ref).
+    /// Another engine would refuse it too.
+    Invalid(String),
     /// Anything else from the engine (CDP error, crash, lost connection).
     Engine(String),
 }
@@ -24,7 +27,7 @@ impl fmt::Display for Error {
             Error::UnknownRef(r) => write!(f, "unknown ref @{r}: take a snapshot to get current refs"),
             Error::StaleRef(r) => write!(f, "stale ref @{r}: the element is gone, take a new snapshot"),
             Error::Unsupported(op) => write!(f, "{op} is not supported here"),
-            Error::Timeout(m) | Error::Engine(m) => write!(f, "{m}"),
+            Error::Timeout(m) | Error::Invalid(m) | Error::Engine(m) => write!(f, "{m}"),
         }
     }
 }

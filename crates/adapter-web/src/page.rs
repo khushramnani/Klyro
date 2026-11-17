@@ -95,7 +95,7 @@ impl WebPage {
     }
 
     fn press(&mut self, spec: &str) -> Result<()> {
-        let k = keys::parse(spec).map_err(Error::Engine)?;
+        let k = keys::parse(spec).map_err(Error::Invalid)?;
         let down = if k.text.is_some() { "keyDown" } else { "rawKeyDown" };
         for t in [down, "keyUp"] {
             let mut p = json!({ "type": t, "key": k.key, "code": k.code, "windowsVirtualKeyCode": k.vk,
@@ -169,7 +169,7 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
 }
 
 fn need_ref<'a>(target: Option<&'a str>, what: &str) -> Result<&'a str> {
-    target.ok_or_else(|| Error::Engine(format!("{what} needs a ref, e.g. {what} e3")))
+    target.ok_or_else(|| Error::Invalid(format!("{what} needs a ref, e.g. {what} e3")))
 }
 
 const FILL_JS: &str = "function() {
@@ -224,7 +224,7 @@ impl Adapter for WebPage {
                 let r = need_ref(target, "fill")?;
                 let b = self.node(r)?;
                 if self.call_on(r, b, FILL_JS)? != json!(true) {
-                    return Err(Error::Engine(format!("@{} is not a text field", r.trim_start_matches('@'))));
+                    return Err(Error::Invalid(format!("@{} is not a text field", r.trim_start_matches('@'))));
                 }
                 // insertText fires real input events, so frameworks (React, Vue) see the change.
                 self.cdp.call("Input.insertText", json!({ "text": text }))?;
@@ -245,7 +245,7 @@ impl Adapter for WebPage {
             return Err(Error::Unsupported("screenshot on the lightpanda engine (no real pixels); use --engine chromium"));
         }
         if opts.page.is_some() {
-            return Err(Error::Unsupported("screenshot --page on a web page (it is for documents)"));
+            return Err(Error::Invalid("screenshot --page is for documents, not web pages".into()));
         }
         let mut params = json!({ "format": "png" });
         if let Some(r) = &opts.target {

@@ -102,7 +102,7 @@ fn first(out: &str) -> &str {
 #[test]
 fn action_errors_are_clear_and_exit_nonzero() {
     let app = demo_app();
-    let k = Klyro::new("errors");
+    let k = Klyro::with_engine("errors", ""); // automatic lanes
     k.ok(&["open", &format!("{app}/login")]);
     let snap = k.ok(&["snapshot"]);
 
@@ -110,7 +110,40 @@ fn action_errors_are_clear_and_exit_nonzero() {
     assert!(k.fails(&["fill", &ref_of(&snap, "Sign in"), "x"]).contains("is not a text field"));
     assert!(k.fails(&["press", "Hyper+q"]).contains("unknown modifier"));
     assert!(k.fails(&["wait", "--text", "never there", "--timeout", "300"]).contains("timed out"));
+    // Caller mistakes are not engine faults: the session stays on its lane.
+    if have_lightpanda() {
+        assert!(k.ok(&["status"]).contains("lane: lightpanda (auto)
+switches: none"), "{}", k.ok(&["status"]));
+    }
     assert!(k.fails(&["open", "http://127.0.0.1:1/"]).contains("could not open"));
+}
+
+/// Checkpoint C: the demo flow with the router on, through the CLI, then a correct screenshot.
+#[test]
+fn demo_flow_with_router_then_screenshot() {
+    let app = demo_app();
+    let k = Klyro::with_engine("router-flow", "");
+    k.ok(&["open", &format!("{app}/login")]);
+    let snap = k.ok(&["snapshot", "-i"]);
+    k.ok(&["fill", &ref_of(&snap, "Username"), "demo"]);
+    k.ok(&["fill", &ref_of(&snap, "Password"), "secret"]);
+    let out = k.ok(&["click", &ref_of(&snap, "Log in")]);
+    assert!(out.contains("page changed:") && out.contains("Dashboard"), "{out}");
+
+    let shot = k.home.join("dashboard.png");
+    let (ok, out, err) = k.run(&["screenshot", shot.to_str().unwrap()]);
+    assert!(ok, "{err}");
+    assert!(out.contains("(1280x800,"), "{out}");
+    assert_eq!(png_dims(&shot), (1280, 800));
+    assert!(k.ok(&["text"]).contains("You are logged in."), "screenshot session must be logged in");
+    if have_lightpanda() {
+        assert!(err.contains("switched lane: lightpanda -> chromium"), "{err}");
+        let status = k.ok(&["status"]);
+        assert!(status.contains("lane: chromium (auto)") && status.contains("screenshot needs it"), "{status}");
+    }
+    if let Ok(dir) = std::env::var("KLYRO_KEEP_SHOT") {
+        std::fs::copy(&shot, std::path::Path::new(&dir).join("checkpoint-c.png")).unwrap();
+    }
 }
 
 #[test]

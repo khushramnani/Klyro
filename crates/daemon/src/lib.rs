@@ -181,7 +181,7 @@ page changed: {}
 {}", after.url, after.to_text()), json!({ "done": done, "target": target, "page_changed": true, "snapshot": after }))
         } else if d.is_empty() {
             (format!("{head}
-no visible change"), json!({ "done": done, "target": target, "diff": d }))
+no change yet (run `wait` or `snapshot` if the page updates later)"), json!({ "done": done, "target": target, "diff": d }))
         } else {
             (format!("{head}
 {}", d.to_text()), json!({ "done": done, "target": target, "diff": d }))
