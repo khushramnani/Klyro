@@ -3,6 +3,12 @@
 mod ax;
 mod cdp;
 mod chromium;
+mod engine;
 mod keys;
+mod lightpanda;
+mod page;
 
-pub use chromium::{Chromium, find_chrome};
+pub use chromium::find_chrome;
+pub use engine::Engine;
+pub use lightpanda::find_lightpanda;
+pub use page::WebPage;

@@ -66,18 +66,31 @@ pub fn ref_of(snapshot: &str, needle: &str) -> String {
 
 pub struct Klyro {
     pub home: PathBuf,
+    /// Engine for new sessions; None leaves KLYRO_ENGINE from the environment alone.
+    pub engine: Option<&'static str>,
 }
 
 impl Klyro {
     pub fn new(name: &str) -> Self {
         let home = std::env::temp_dir().join(format!("klyro-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        Klyro { home }
+        Klyro { home, engine: None }
+    }
+
+    pub fn with_engine(name: &str, engine: &'static str) -> Self {
+        let mut k = Self::new(&format!("{name}-{engine}"));
+        k.engine = Some(engine);
+        k
     }
 
     /// (success, stdout, stderr)
     pub fn run(&self, args: &[&str]) -> (bool, String, String) {
-        let out = Command::new(env!("CARGO_BIN_EXE_klyro")).args(args).env("KLYRO_HOME", &self.home).output().unwrap();
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_klyro"));
+        cmd.args(args).env("KLYRO_HOME", &self.home);
+        if let Some(e) = self.engine {
+            cmd.env("KLYRO_ENGINE", e);
+        }
+        let out = cmd.output().unwrap();
         (out.status.success(), String::from_utf8_lossy(&out.stdout).into(), String::from_utf8_lossy(&out.stderr).into())
     }
 
@@ -92,6 +105,15 @@ impl Klyro {
         assert!(!ok, "klyro {args:?} should fail, printed: {out}");
         err
     }
+}
+
+/// Lightpanda is optional: tests on it skip (loudly) where it is not installed.
+pub fn have_lightpanda() -> bool {
+    let found = klyro_adapter_web::find_lightpanda().is_some();
+    if !found {
+        eprintln!("SKIP: Lightpanda not installed");
+    }
+    found
 }
 
 impl Drop for Klyro {

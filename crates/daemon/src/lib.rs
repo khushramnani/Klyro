@@ -3,7 +3,7 @@
 pub mod ipc;
 
 use ipc::{Info, Request, Response};
-use klyro_adapter_web::Chromium;
+use klyro_adapter_web::{Engine, WebPage};
 use klyro_core::{Action, Adapter, Wait};
 use std::time::Duration;
 use std::collections::HashMap;
@@ -107,6 +107,8 @@ fn no_session(name: &str) -> String {
 
 fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
     let url = normalize_url(req.args.first().ok_or("open needs a URL")?);
+    // ponytail: Chromium until the router (Task 8) picks the lane.
+    let engine: Engine = req.engine.as_deref().unwrap_or("chromium").parse()?;
     let mut created = false;
     let session = {
         let mut map = sessions.lock().unwrap();
@@ -115,7 +117,7 @@ fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
             None => {
                 created = true;
                 // ponytail: launches while holding the map lock (about a second); per-session init if that hurts.
-                let s: Session = Arc::new(Mutex::new(Box::new(Chromium::launch(req.headed).map_err(|e| e.to_string())?)));
+                let s: Session = Arc::new(Mutex::new(Box::new(WebPage::launch(engine, req.headed).map_err(|e| e.to_string())?)));
                 map.insert(req.session.clone(), s.clone());
                 s
             }

@@ -1,7 +1,7 @@
 //! End-to-end: real `klyro` binary, real daemon, real Chromium, local demo app.
 
 mod common;
-use common::{Klyro, demo_app, ref_of};
+use common::{Klyro, demo_app, have_lightpanda, ref_of};
 use std::time::{Duration, Instant};
 
 #[test]
@@ -46,8 +46,20 @@ fn open_snapshot_close_with_named_sessions() {
 
 #[test]
 fn login_flow() {
+    login_flow_on("chromium");
+}
+
+#[test]
+fn login_flow_lightpanda() {
+    if have_lightpanda() {
+        login_flow_on("lightpanda");
+    }
+}
+
+/// The plan's demo flow, CLI commands only. Identical on every engine.
+fn login_flow_on(engine: &'static str) {
     let app = demo_app();
-    let k = Klyro::new("login");
+    let k = Klyro::with_engine("login", engine);
     k.ok(&["open", &format!("{app}/login")]);
     let snap = k.ok(&["snapshot"]);
     let (user, pass, submit) = (ref_of(&snap, "Username"), ref_of(&snap, "Password"), ref_of(&snap, "Log in"));
@@ -88,4 +100,15 @@ fn action_errors_are_clear_and_exit_nonzero() {
     assert!(k.fails(&["press", "Hyper+q"]).contains("unknown modifier"));
     assert!(k.fails(&["wait", "--text", "never there", "--timeout", "300"]).contains("timed out"));
     assert!(k.fails(&["open", "http://127.0.0.1:1/"]).contains("could not open"));
+}
+
+#[test]
+fn lightpanda_unsupported_is_typed() {
+    if !have_lightpanda() {
+        return;
+    }
+    let k = Klyro::new("lp-unsupported");
+    let err = k.fails(&["open", "--headed", "--engine", "lightpanda", "about:blank"]);
+    assert!(err.contains("is not supported here"), "{err}");
+    assert!(k.fails(&["open", "--engine", "firefox", "about:blank"]).contains("unknown engine 'firefox'"));
 }

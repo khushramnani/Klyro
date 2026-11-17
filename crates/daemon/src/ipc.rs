@@ -21,6 +21,9 @@ pub struct Request {
     /// `open` only: start the session with a visible browser window.
     #[serde(default)]
     pub headed: bool,
+    /// `open` only: engine for a new session (chromium | lightpanda).
+    #[serde(default)]
+    pub engine: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

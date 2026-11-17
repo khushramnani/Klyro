@@ -28,6 +28,9 @@ enum Cmd {
         /// Show a real browser window, to watch or debug. Only applies when the session starts.
         #[arg(long)]
         headed: bool,
+        /// Browser engine: chromium (visual) or lightpanda (fast, no pixels). Only applies when the session starts.
+        #[arg(long, env = "KLYRO_ENGINE")]
+        engine: Option<String>,
     },
     /// Print the page as a tree with refs, e.g. `- button "Login" [ref=e3]`.
     Snapshot,
@@ -74,7 +77,7 @@ enum Cmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let mut headed = false;
+    let (mut headed, mut engine) = (false, None);
     let (cmd, args) = match cli.cmd {
         Cmd::Daemon => {
             return match klyro_daemon::run() {
@@ -85,8 +88,9 @@ fn main() -> ExitCode {
                 }
             };
         }
-        Cmd::Open { url, headed: h } => {
+        Cmd::Open { url, headed: h, engine: e } => {
             headed = h;
+            engine = e;
             ("open", vec![url])
         }
         Cmd::Snapshot => ("snapshot", vec![]),
@@ -105,7 +109,7 @@ fn main() -> ExitCode {
         }
         Cmd::Close => ("close", vec![]),
     };
-    let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed };
+    let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed, engine };
     // Only `open` may start a daemon; other commands need an existing session anyway.
     match send(req, cmd == "open") {
         Ok(Response { ok: true, out }) => {
