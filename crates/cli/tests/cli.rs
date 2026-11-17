@@ -112,3 +112,52 @@ fn lightpanda_unsupported_is_typed() {
     assert!(err.contains("is not supported here"), "{err}");
     assert!(k.fails(&["open", "--engine", "firefox", "about:blank"]).contains("unknown engine 'firefox'"));
 }
+
+/// (width, height) from a PNG file's IHDR chunk.
+fn png_dims(path: &std::path::Path) -> (u32, u32) {
+    let b = std::fs::read(path).unwrap();
+    assert_eq!(&b[..8], b"\x89PNG\r\n\x1a\n", "{} is not a PNG", path.display());
+    let be = |i: usize| u32::from_be_bytes(b[i..i + 4].try_into().unwrap());
+    (be(16), be(20))
+}
+
+#[test]
+fn screenshot() {
+    let app = demo_app();
+    let k = Klyro::new("screenshot");
+    let dir = k.home.join("shots");
+    std::fs::create_dir_all(&dir).unwrap();
+    k.ok(&["open", &format!("{app}/long")]);
+
+    let view = dir.join("view.png");
+    let out = k.ok(&["screenshot", view.to_str().unwrap()]);
+    assert!(out.contains("view.png (1280x800,"), "path and size printed: {out}");
+    assert_eq!(png_dims(&view), (1280, 800));
+
+    let full = dir.join("full.png");
+    k.ok(&["screenshot", "--full", full.to_str().unwrap()]);
+    let (_, h) = png_dims(&full);
+    assert!(h > 3000, "full page should include the 3000px block, got height {h}");
+
+    let snap = k.ok(&["snapshot"]);
+    let el = dir.join("el.png");
+    k.ok(&["screenshot", "--ref", &ref_of(&snap, "Top"), el.to_str().unwrap()]);
+    let (w, h) = png_dims(&el);
+    assert!(w > 10 && w <= 1280 && h > 10 && h < 200, "heading crop looks wrong: {w}x{h}");
+
+    let json: serde_json::Value = serde_json::from_str(&k.ok(&["screenshot", "--json", view.to_str().unwrap()])).unwrap();
+    assert_eq!((json["width"].as_u64(), json["height"].as_u64()), (Some(1280), Some(800)));
+
+    assert!(k.fails(&["screenshot", "--ref", "e99", view.to_str().unwrap()]).contains("unknown ref"));
+}
+
+#[test]
+fn screenshot_is_unsupported_on_lightpanda() {
+    if !have_lightpanda() {
+        return;
+    }
+    let k = Klyro::with_engine("shot-lp", "lightpanda");
+    k.ok(&["open", &format!("{}/long", demo_app())]);
+    let err = k.fails(&["screenshot", k.home.join("x.png").to_str().unwrap()]);
+    assert!(err.contains("not supported here"), "{err}");
+}

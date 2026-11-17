@@ -53,6 +53,17 @@ enum Cmd {
     },
     /// Print the page's readable text.
     Text,
+    /// Save a PNG of the viewport, the full page, or one element.
+    Screenshot {
+        #[arg(default_value = "screenshot.png")]
+        path: std::path::PathBuf,
+        /// The whole page, not just the viewport.
+        #[arg(long, conflicts_with = "target")]
+        full: bool,
+        /// Only this element.
+        #[arg(long = "ref", value_name = "REF")]
+        target: Option<String>,
+    },
     /// Wait for a delay, some text, or a URL.
     #[command(group(ArgGroup::new("until").required(true).args(["ms", "text", "url"])))]
     Wait {
@@ -98,6 +109,18 @@ fn main() -> ExitCode {
         Cmd::Fill { target, text } => ("fill", vec![target, text]),
         Cmd::Press { key, target } => ("press", [Some(key), target].into_iter().flatten().collect()),
         Cmd::Text => ("text", vec![]),
+        Cmd::Screenshot { path, full, target } => {
+            // The daemon writes the file, so resolve relative paths against our cwd.
+            let path = std::env::current_dir().map(|d| d.join(&path)).unwrap_or(path);
+            let mut args = vec![path.display().to_string()];
+            if full {
+                args.push("full".into());
+            }
+            if let Some(r) = target {
+                args.push(format!("ref={r}"));
+            }
+            ("screenshot", args)
+        }
         Cmd::Wait { ms, text, url, timeout } => {
             let (kind, value) = match (ms, text, url) {
                 (Some(ms), _, _) => ("ms", ms.to_string()),

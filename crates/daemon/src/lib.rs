@@ -4,7 +4,7 @@ pub mod ipc;
 
 use ipc::{Info, Request, Response};
 use klyro_adapter_web::{Engine, WebPage};
-use klyro_core::{Action, Adapter, Wait};
+use klyro_core::{Action, Adapter, ScreenshotOptions, Wait};
 use std::time::Duration;
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
@@ -76,6 +76,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
             None => Err("press needs a key".into()),
         },
         "text" => with_session(req, sessions, |a| a.text()),
+        "screenshot" => screenshot(req, sessions),
         "wait" => wait(req, sessions),
         "close" => {
             let mut map = sessions.lock().unwrap();
@@ -144,6 +145,36 @@ fn act(req: &Request, sessions: &Sessions, ref_at: usize, action: Action, done: 
     Ok(format!("{done} {what}"))
 }
 
+/// args: [absolute path, "full" | "ref=<ref>" ...]
+fn screenshot(req: &Request, sessions: &Sessions) -> Result<String, String> {
+    let path = req.args.first().ok_or("screenshot needs a file path")?;
+    let mut opts = ScreenshotOptions::default();
+    for a in &req.args[1..] {
+        match a.split_once('=') {
+            Some(("ref", r)) => opts.target = Some(r.trim_start_matches('@').to_string()),
+            _ if a == "full" => opts.full_page = true,
+            _ => return Err(format!("bad screenshot option {a}")),
+        }
+    }
+    let png = with_session(req, sessions, |a| a.screenshot(&opts))?;
+    std::fs::write(path, &png).map_err(|e| format!("could not write {path}: {e}"))?;
+    let (w, h) = png_size(&png).unwrap_or((0, 0));
+    Ok(if req.json {
+        serde_json::json!({ "path": path, "width": w, "height": h, "bytes": png.len() }).to_string()
+    } else {
+        format!("saved {path} ({w}x{h}, {} KB)", png.len().div_ceil(1024))
+    })
+}
+
+/// Width and height from a PNG's IHDR chunk.
+fn png_size(png: &[u8]) -> Option<(u32, u32)> {
+    if png.get(..8)? != b"\x89PNG\r\n\x1a\n" || png.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let be = |r: std::ops::Range<usize>| Some(u32::from_be_bytes(png.get(r)?.try_into().ok()?));
+    Some((be(16..20)?, be(20..24)?))
+}
+
 /// args: [kind, value, timeout_ms] with kind ms | text | url.
 fn wait(req: &Request, sessions: &Sessions) -> Result<String, String> {
     let (kind, value) = (req.args.first().map(String::as_str), req.args.get(1).cloned().unwrap_or_default());
@@ -188,6 +219,15 @@ mod tests {
         assert_eq!(super::normalize_url("example.com"), "https://example.com");
         assert_eq!(super::normalize_url("http://127.0.0.1:8080/a"), "http://127.0.0.1:8080/a");
         assert_eq!(super::normalize_url("about:blank"), "about:blank");
+    }
+
+    #[test]
+    fn png_size() {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(1280u32.to_be_bytes());
+        png.extend(800u32.to_be_bytes());
+        assert_eq!(super::png_size(&png), Some((1280, 800)));
+        assert_eq!(super::png_size(b"not a png"), None);
     }
 
     #[test]

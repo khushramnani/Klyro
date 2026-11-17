@@ -4,6 +4,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard};
+
+/// Browser tests take turns: parallel Chromes on a small machine starve each other and
+/// CDP calls time out.
+static ONE_BROWSER_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 const LOGIN: &str = include_str!("../../../../tests/fixtures/demo-app/login.html");
 const DASHBOARD: &str = include_str!("../../../../tests/fixtures/demo-app/dashboard.html");
@@ -41,6 +46,7 @@ pub fn demo_app() -> String {
                 }
                 (Some("POST"), "/login") => html(&LOGIN.replace("<!--ERROR-->", "<p role=\"alert\">Wrong username or password</p>")),
                 (_, "/dashboard") if cookie.contains("sid=ok") => html(DASHBOARD),
+                (_, "/long") => html("<!doctype html><title>Long</title><h1>Top</h1><div style=\"height:3000px\"></div><p>Bottom</p>"),
                 (_, "/dashboard") => "HTTP/1.1 303 See Other\r\nLocation: /login\r\nContent-Length: 0\r\n\r\n".to_string(),
                 _ => html(LOGIN),
             };
@@ -68,13 +74,16 @@ pub struct Klyro {
     pub home: PathBuf,
     /// Engine for new sessions; None leaves KLYRO_ENGINE from the environment alone.
     pub engine: Option<&'static str>,
+    // Dropped after Drop::drop has closed the sessions.
+    _turn: MutexGuard<'static, ()>,
 }
 
 impl Klyro {
     pub fn new(name: &str) -> Self {
         let home = std::env::temp_dir().join(format!("klyro-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
-        Klyro { home, engine: None }
+        let turn = ONE_BROWSER_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        Klyro { home, engine: None, _turn: turn }
     }
 
     pub fn with_engine(name: &str, engine: &'static str) -> Self {

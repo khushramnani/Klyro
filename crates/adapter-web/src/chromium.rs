@@ -50,6 +50,9 @@ pub(crate) fn start(headed: bool) -> Result<(Proc, String)> {
         cmd.arg("--headless=new");
     }
     cmd.args(["--remote-debugging-port=0", "--no-first-run", "--no-default-browser-check"])
+        // Chrome throttles pages it thinks are in the background (screenshots then hang under
+        // load); an automated page is never in the background. Same defaults as Puppeteer.
+        .args(["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"])
         .arg(format!("--user-data-dir={}", profile.display()))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
