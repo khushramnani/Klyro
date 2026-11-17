@@ -27,6 +27,14 @@ Pin one lane for a session, which turns automatic switching off:
 gives PDF text page by page; `screenshot --page 2` captures one PDF page. Office files
 (docx, pptx, xlsx) are not supported yet.
 
+## Use from an agent
+
+- **Skill (Claude Code, Codex, any agent with a shell):** `skill/SKILL.md` teaches the commands.
+- **MCP:** `klyro mcp` serves the same commands as MCP tools over stdio, with the same compact
+  text; screenshots also come back as images.
+  - Claude Code: `claude mcp add klyro -- klyro mcp`
+  - Other clients: `{ "mcpServers": { "klyro": { "command": "klyro", "args": ["mcp"] } } }`
+
 ## Third-party code
 
 - [pdf.js](https://github.com/mozilla/pdf.js) 6.5.438 (Apache-2.0), unmodified build files in

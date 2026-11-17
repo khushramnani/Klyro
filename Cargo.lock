@@ -249,6 +249,7 @@ dependencies = [
  "clap",
  "klyro-adapter-web",
  "klyro-daemon",
+ "klyro-mcp",
  "serde_json",
 ]
 
@@ -267,6 +268,14 @@ dependencies = [
  "klyro-adapter-web",
  "klyro-core",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "klyro-mcp"
+version = "0.1.0"
+dependencies = [
+ "klyro-daemon",
  "serde_json",
 ]
 

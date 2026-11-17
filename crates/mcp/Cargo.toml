@@ -1,0 +1,10 @@
+[package]
+name = "klyro-mcp"
+description = "Klyro as an MCP server over stdio."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+klyro-daemon.workspace = true
+serde_json.workspace = true

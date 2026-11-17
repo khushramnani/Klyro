@@ -1,5 +1,6 @@
 //! Klyro daemon: keeps browser sessions alive between CLI calls.
 
+pub mod client;
 pub mod ipc;
 pub mod router;
 

@@ -399,3 +399,93 @@ fn documents_pdf_markdown_html() {
     std::fs::write(&deck, b"x").unwrap();
     assert!(k.fails(&["open", deck.to_str().unwrap()]).contains(".pptx files are not supported yet"));
 }
+
+/// A minimal MCP client over the `klyro mcp` process's stdio.
+struct Mcp {
+    child: std::process::Child,
+    out: std::io::BufReader<std::process::ChildStdout>,
+    next: u64,
+}
+
+impl Mcp {
+    fn start(home: &std::path::Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_klyro"))
+            .arg("mcp")
+            .env("KLYRO_HOME", home)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let out = std::io::BufReader::new(child.stdout.take().unwrap());
+        Mcp { child, out, next: 0 }
+    }
+
+    fn send(&mut self, msg: serde_json::Value) {
+        use std::io::Write;
+        writeln!(self.child.stdin.as_mut().unwrap(), "{msg}").unwrap();
+    }
+
+    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        use std::io::BufRead;
+        self.next += 1;
+        self.send(serde_json::json!({ "jsonrpc": "2.0", "id": self.next, "method": method, "params": params }));
+        let mut line = String::new();
+        self.out.read_line(&mut line).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], self.next);
+        v["result"].clone()
+    }
+
+    /// (text of the first text content, isError, full result)
+    fn tool(&mut self, name: &str, args: serde_json::Value) -> (String, bool, serde_json::Value) {
+        let r = self.request("tools/call", serde_json::json!({ "name": name, "arguments": args }));
+        let text = r["content"].as_array().unwrap().iter().find(|c| c["type"] == "text").unwrap()["text"].as_str().unwrap().to_string();
+        (text, r["isError"] == true, r)
+    }
+}
+
+impl Drop for Mcp {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn mcp_client_lists_tools_and_completes_demo_flow() {
+    let app = demo_app();
+    let k = Klyro::with_engine("mcp", ""); // automatic lanes; its Drop closes the session
+    let mut m = Mcp::start(&k.home);
+
+    let init = m.request("initialize", serde_json::json!({ "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": { "name": "test", "version": "0" } }));
+    assert_eq!(init["serverInfo"]["name"], "klyro");
+    m.send(serde_json::json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+    let tools = m.request("tools/list", serde_json::json!({}));
+    assert!(tools["tools"].as_array().unwrap().len() >= 11);
+
+    let (out, err, _) = m.tool("open", serde_json::json!({ "url": format!("{app}/login") }));
+    assert!(!err && out.starts_with("opened "), "{out}");
+    let (snap, ..) = m.tool("snapshot", serde_json::json!({ "interactive": true }));
+    // Same compact text as the CLI, from the same session.
+    assert_eq!(snap.trim_end(), k.ok(&["snapshot", "-i"]).trim_end());
+
+    let (out, ..) = m.tool("fill", serde_json::json!({ "ref": ref_of(&snap, "Username"), "text": "demo" }));
+    assert!(out.contains("~ textbox \"Username\"") && out.contains("[value=\"demo\"]"), "{out}");
+    m.tool("fill", serde_json::json!({ "ref": ref_of(&snap, "Password"), "text": "secret" }));
+    let (out, ..) = m.tool("click", serde_json::json!({ "ref": ref_of(&snap, "Log in") }));
+    assert!(out.contains("page changed:") && out.contains("Dashboard"), "{out}");
+
+    let (out, err, full) = m.tool("screenshot", serde_json::json!({}));
+    assert!(!err && out.contains("(1280x800,"), "{out}");
+    let img = full["content"].as_array().unwrap().iter().find(|c| c["type"] == "image").expect("inline image");
+    assert_eq!(img["mimeType"], "image/png");
+    assert!(img["data"].as_str().unwrap().starts_with("iVBORw0KGgo"), "base64 PNG");
+
+    let (text, ..) = m.tool("text", serde_json::json!({}));
+    assert!(text.contains("You are logged in."), "{text}");
+
+    let (out, err, _) = m.tool("click", serde_json::json!({ "ref": "e999" }));
+    assert!(err && out.contains("unknown ref"), "errors come back as tool errors: {out}");
+    let (out, err, _) = m.tool("close", serde_json::json!({}));
+    assert!(!err && out.contains("closed session default"), "{out}");
+}
