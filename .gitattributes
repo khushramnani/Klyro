@@ -1,3 +1,4 @@
 *.pdf binary
 *.png binary
 crates/adapter-web/vendor/** -text
+*.sh text eol=lf

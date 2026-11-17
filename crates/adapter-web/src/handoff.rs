@@ -1,5 +1,5 @@
-//! What moves when a session changes engine: the URL, the cookies, and ref numbering.
-//! In-page JavaScript state does not move (see the plan); `--engine chromium` keeps it.
+//! What moves when a session changes engine: the URL, the cookies, form field values and ref
+//! numbering. Other in-page JavaScript state does not move; `--engine chromium` keeps it.
 
 use crate::page::WebPage;
 use klyro_core::Result;
@@ -27,6 +27,21 @@ impl WebPage {
         Ok(())
     }
 
+    /// Values of the page's form fields, in document order (null for fields that carry nothing).
+    pub fn form_values(&mut self) -> Result<Value> {
+        self.eval(COLLECT_FORM)
+    }
+
+    /// Puts saved form values back, firing input/change events so the page reacts as if typed.
+    /// Skipped when the page has a different set of fields. Returns how many fields changed.
+    pub fn restore_form_values(&mut self, saved: &Value) -> Result<usize> {
+        if !saved.as_array().is_some_and(|a| a.iter().any(|v| !v.is_null())) {
+            return Ok(0);
+        }
+        let n = self.eval(&format!("({RESTORE_FORM})({saved})"))?;
+        Ok(n.as_u64().unwrap_or(0) as usize)
+    }
+
     pub fn next_ref(&self) -> u32 {
         self.refs.next_index()
     }
@@ -36,6 +51,35 @@ impl WebPage {
         self.refs = klyro_core::RefMap::starting_at(next);
     }
 }
+
+const COLLECT_FORM: &str = "[...document.querySelectorAll('input, textarea, select')].map(el => {
+    const t = (el.type || '').toLowerCase();
+    if (['hidden', 'file', 'submit', 'button', 'reset', 'image'].includes(t)) return null;
+    return (t === 'checkbox' || t === 'radio') ? { checked: el.checked } : { value: el.value };
+})";
+
+const RESTORE_FORM: &str = "(saved) => {
+    const els = [...document.querySelectorAll('input, textarea, select')];
+    if (els.length !== saved.length) return 0;
+    let n = 0;
+    els.forEach((el, i) => {
+        const s = saved[i];
+        if (!s) return;
+        if ('checked' in s) {
+            const toggle = s.checked ? !el.checked : (el.checked && el.type === 'checkbox');
+            if (toggle) { el.click(); n++; }
+            return;
+        }
+        if (el.value === s.value) return;
+        // The prototype's setter, so frameworks that track the value (React) see the change.
+        const set = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
+        set ? set.call(el, s.value) : (el.value = s.value);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        n++;
+    });
+    return n;
+}";
 
 /// A getCookies entry -> a setCookies param. Keeps only fields setCookies accepts;
 /// session cookies (expires <= 0, as Lightpanda reports them) get no expiry.

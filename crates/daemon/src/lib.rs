@@ -19,6 +19,7 @@ type Sessions = Arc<Mutex<HashMap<String, Session>>>;
 
 /// Runs until the last session closes.
 pub fn run() -> io::Result<()> {
+    kill_children_with_me();
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let token = ipc::new_token();
     ipc::write_info(&Info { port: listener.local_addr()?.port(), token: token.clone(), pid: std::process::id() })?;
@@ -37,6 +38,65 @@ pub fn run() -> io::Result<()> {
     }
     Ok(())
 }
+
+/// Browsers must not outlive the daemon, even when it is force-killed.
+/// Windows: the daemon joins a job object that kills every process in it when the daemon's
+/// handle closes (i.e. when the daemon dies, however it dies); children join automatically.
+#[cfg(windows)]
+fn kill_children_with_me() {
+    use std::ffi::c_void;
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicLimits {
+        per_process_user_time: i64,
+        per_job_user_time: i64,
+        limit_flags: u32,
+        min_working_set: usize,
+        max_working_set: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct ExtendedLimits {
+        basic: BasicLimits,
+        io: [u64; 6],
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory: usize,
+        peak_job_memory: usize,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateJobObjectW(attrs: *mut c_void, name: *const u16) -> *mut c_void;
+        fn SetInformationJobObject(job: *mut c_void, class: i32, info: *const c_void, len: u32) -> i32;
+        fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+        fn GetCurrentProcess() -> *mut c_void;
+    }
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
+    let mut info = ExtendedLimits::default();
+    info.basic.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    // SAFETY: plain Win32 calls with a correctly laid out struct; the job handle is
+    // deliberately never closed, so it closes (and kills the job) when the daemon exits.
+    let ok = unsafe {
+        let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+        !job.is_null()
+            && SetInformationJobObject(job, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, (&raw const info).cast(), size_of::<ExtendedLimits>() as u32) != 0
+            && AssignProcessToJobObject(job, GetCurrentProcess()) != 0
+    };
+    if !ok {
+        eprintln!("warning: could not tie browsers to the daemon; a force-killed daemon may leave them running");
+    }
+}
+
+/// ponytail: Linux's PR_SET_PDEATHSIG fires when the spawning *thread* exits, and browsers start
+/// on short-lived request threads, so it would kill them at once. A force-killed daemon can leave
+/// browsers running here; a reaper keyed on the profile dir is the upgrade if that bites.
+#[cfg(not(windows))]
+fn kill_children_with_me() {}
 
 fn handle(stream: TcpStream, token: &str, sessions: &Sessions) -> io::Result<()> {
     let mut line = String::new();

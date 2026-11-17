@@ -96,14 +96,22 @@ impl Router {
     fn switch(&mut self, reason: &str) -> Result<()> {
         let url = self.page.url().unwrap_or_default();
         let cookies = self.page.cookies().unwrap_or_default();
+        let form = self.page.form_values().unwrap_or_default();
         let mut next = WebPage::launch(Engine::Chromium, self.headed)?;
         self.lane_ref_start = self.page.next_ref();
         next.continue_refs_from(self.lane_ref_start);
         next.set_cookies(&cookies)?;
+        let mut fields = 0;
         if !url.is_empty() && url != "about:blank" {
             next.open(&url)?;
+            // Typed values would otherwise vanish with the reload (the screenshot would lie).
+            fields = next.restore_form_values(&form).unwrap_or(0);
         }
-        let line = format!("{} -> chromium: {reason} (carried {} cookies and {url})", self.lane(), cookies.len());
+        let line = format!(
+            "{} -> chromium: {reason} (carried {} cookies, {fields} form fields and {url})",
+            self.lane(),
+            cookies.len()
+        );
         eprintln!("router: {line}");
         self.switches.push(line.clone());
         self.unreported.push(line);

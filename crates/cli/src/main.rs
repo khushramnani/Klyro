@@ -1,5 +1,7 @@
 //! `klyro`: thin CLI. Sends one request to the daemon, starting it if needed.
 
+mod doctor;
+
 use clap::{ArgGroup, Parser, Subcommand};
 use klyro_daemon::ipc::{self, Request, Response};
 use std::io::{BufRead, BufReader, Write};
@@ -94,6 +96,8 @@ enum Cmd {
     Status,
     /// Close the session and its browser.
     Close,
+    /// Check which engines this machine has, and the daemon.
+    Doctor,
     /// Run the background daemon (started automatically).
     #[command(hide = true)]
     Daemon,
@@ -112,6 +116,7 @@ fn main() -> ExitCode {
                 }
             };
         }
+        Cmd::Doctor => return doctor::run(cli.json),
         Cmd::Open { url, headed: h, engine: e } => {
             headed = h;
             engine = e;

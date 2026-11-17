@@ -65,6 +65,27 @@ fn router_login_on_fast_lane_then_screenshot_shows_logged_in_page() {
 }
 
 #[test]
+fn router_carries_typed_form_values_across_a_switch() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    if !have_lightpanda() {
+        return;
+    }
+    let app = demo_app();
+    let mut r = Router::start(None, false, false).unwrap();
+    log_in(&mut r, &app);
+    let s = r.snapshot().unwrap();
+    r.act(find(&s.nodes, "textbox", "Note").as_deref(), &Action::Fill("typed on the fast lane".into())).unwrap();
+    assert!(r.text().unwrap().contains("Note says: typed on the fast lane"));
+
+    r.screenshot(&ScreenshotOptions::default()).unwrap(); // moves to Chromium, reloading the page
+    assert_eq!(r.lane(), Engine::Chromium);
+    assert!(r.switches()[0].contains("1 form fields"), "{:?}", r.switches());
+    // The value is back, and the page reacted to it (its input handler echoed it).
+    assert!(r.text().unwrap().contains("Note says: typed on the fast lane"), "{}", r.text().unwrap());
+    r.close().unwrap();
+}
+
+#[test]
 fn router_maps_refs_across_a_switch() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     if !have_lightpanda() {

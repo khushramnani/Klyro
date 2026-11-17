@@ -1,0 +1,50 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-13, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked -p klyro-cli --target ${{ matrix.target }}
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: tar -czf klyro-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release klyro
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: Compress-Archive target/${{ matrix.target }}/release/klyro.exe klyro-${{ matrix.target }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: klyro-${{ matrix.target }}
+          path: klyro-${{ matrix.target }}.*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - run: sha256sum klyro-* > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            klyro-*
+            SHA256SUMS
