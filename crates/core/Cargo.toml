@@ -1,0 +1,10 @@
+[package]
+name = "klyro-core"
+description = "Core types for Klyro: adapter interface, snapshot tree, refs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
