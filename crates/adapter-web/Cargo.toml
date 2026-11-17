@@ -1,0 +1,11 @@
+[package]
+name = "klyro-adapter-web"
+description = "Klyro web adapter: Chromium (and later Lightpanda) over CDP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+klyro-core.workspace = true
+serde_json.workspace = true
+tungstenite.workspace = true

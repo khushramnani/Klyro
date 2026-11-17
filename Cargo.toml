@@ -10,3 +10,8 @@ version = "0.1.0"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+clap = { version = "4", features = ["derive", "env"] }
+klyro-core = { path = "crates/core" }
+klyro-adapter-web = { path = "crates/adapter-web" }
+klyro-daemon = { path = "crates/daemon" }
