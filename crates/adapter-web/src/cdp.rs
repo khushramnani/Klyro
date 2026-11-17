@@ -84,14 +84,15 @@ impl Cdp {
         self.events.clear();
     }
 
-    pub fn wait_event(&mut self, name: &str, timeout: Duration) -> Result<Option<Value>> {
-        if let Some(i) = self.events.iter().position(|e| e["method"] == name) {
+    /// First event (buffered or new) matching `pred`, or None after `timeout`.
+    pub fn wait_for(&mut self, pred: impl Fn(&Value) -> bool, timeout: Duration) -> Result<Option<Value>> {
+        if let Some(i) = self.events.iter().position(&pred) {
             return Ok(self.events.remove(i));
         }
         let end = Instant::now() + timeout;
         while Instant::now() < end {
             match self.read()? {
-                Some(v) if v["method"] == name => return Ok(Some(v)),
+                Some(v) if v.get("method").is_some() && pred(&v) => return Ok(Some(v)),
                 Some(v) if v.get("method").is_some() => self.keep_event(v),
                 _ => {}
             }

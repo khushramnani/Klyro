@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<title>Demo dashboard</title>
+<h1>Dashboard</h1>
+<p>You are logged in.</p>
+<label>Note <input id="note"></label>
+<p>Note says: <output id="echo"></output></p>
+<script>
+  // Proves fill sends real input events, as React and Vue need.
+  note.addEventListener('input', () => { echo.textContent = note.value; });
+</script>
+</html>

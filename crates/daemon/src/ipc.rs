@@ -18,6 +18,9 @@ pub struct Request {
     pub args: Vec<String>,
     #[serde(default)]
     pub json: bool,
+    /// `open` only: start the session with a visible browser window.
+    #[serde(default)]
+    pub headed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

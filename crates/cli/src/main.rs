@@ -1,6 +1,6 @@
 //! `klyro`: thin CLI. Sends one request to the daemon, starting it if needed.
 
-use clap::{Parser, Subcommand};
+use clap::{ArgGroup, Parser, Subcommand};
 use klyro_daemon::ipc::{self, Request, Response};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -23,9 +23,48 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmd {
     /// Open a URL (starts the session if needed).
-    Open { url: String },
+    Open {
+        url: String,
+        /// Show a real browser window, to watch or debug. Only applies when the session starts.
+        #[arg(long)]
+        headed: bool,
+    },
     /// Print the page as a tree with refs, e.g. `- button "Login" [ref=e3]`.
     Snapshot,
+    /// Click an element.
+    Click {
+        #[arg(value_name = "REF")]
+        target: String,
+    },
+    /// Replace a text field's content.
+    Fill {
+        #[arg(value_name = "REF")]
+        target: String,
+        text: String,
+    },
+    /// Press a key, e.g. Enter, Tab, Control+a. Goes to REF if given, else the focused element.
+    Press {
+        key: String,
+        #[arg(value_name = "REF")]
+        target: Option<String>,
+    },
+    /// Print the page's readable text.
+    Text,
+    /// Wait for a delay, some text, or a URL.
+    #[command(group(ArgGroup::new("until").required(true).args(["ms", "text", "url"])))]
+    Wait {
+        /// Milliseconds to wait.
+        ms: Option<u64>,
+        /// Wait until the page text contains this.
+        #[arg(long)]
+        text: Option<String>,
+        /// Wait until the URL contains this.
+        #[arg(long)]
+        url: Option<String>,
+        /// Give up after this many milliseconds.
+        #[arg(long, default_value_t = 10_000)]
+        timeout: u64,
+    },
     /// Close the session and its browser.
     Close,
     /// Run the background daemon (started automatically).
@@ -35,6 +74,7 @@ enum Cmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let mut headed = false;
     let (cmd, args) = match cli.cmd {
         Cmd::Daemon => {
             return match klyro_daemon::run() {
@@ -45,11 +85,27 @@ fn main() -> ExitCode {
                 }
             };
         }
-        Cmd::Open { url } => ("open", vec![url]),
+        Cmd::Open { url, headed: h } => {
+            headed = h;
+            ("open", vec![url])
+        }
         Cmd::Snapshot => ("snapshot", vec![]),
+        Cmd::Click { target } => ("click", vec![target]),
+        Cmd::Fill { target, text } => ("fill", vec![target, text]),
+        Cmd::Press { key, target } => ("press", [Some(key), target].into_iter().flatten().collect()),
+        Cmd::Text => ("text", vec![]),
+        Cmd::Wait { ms, text, url, timeout } => {
+            let (kind, value) = match (ms, text, url) {
+                (Some(ms), _, _) => ("ms", ms.to_string()),
+                (_, Some(t), _) => ("text", t),
+                (_, _, Some(u)) => ("url", u),
+                _ => unreachable!("clap requires one"),
+            };
+            ("wait", vec![kind.into(), value, timeout.to_string()])
+        }
         Cmd::Close => ("close", vec![]),
     };
-    let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json };
+    let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed };
     // Only `open` may start a daemon; other commands need an existing session anyway.
     match send(req, cmd == "open") {
         Ok(Response { ok: true, out }) => {

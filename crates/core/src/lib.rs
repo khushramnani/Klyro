@@ -4,6 +4,6 @@ mod adapter;
 mod refs;
 mod snapshot;
 
-pub use adapter::{Action, Adapter, Capabilities, Error, Result, ScreenshotOptions};
+pub use adapter::{Action, Adapter, Capabilities, Error, Result, ScreenshotOptions, Wait};
 pub use refs::RefMap;
 pub use snapshot::{Node, Snapshot};

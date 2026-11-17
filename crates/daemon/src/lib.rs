@@ -4,7 +4,8 @@ pub mod ipc;
 
 use ipc::{Info, Request, Response};
 use klyro_adapter_web::Chromium;
-use klyro_core::Adapter;
+use klyro_core::{Action, Adapter, Wait};
+use std::time::Duration;
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -65,6 +66,17 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
             let s = a.snapshot()?;
             Ok(if req.json { s.to_json() } else { s.to_text().trim_end().to_string() })
         }),
+        "click" => act(req, sessions, 0, Action::Click, "clicked"),
+        "fill" => match req.args.get(1) {
+            Some(text) => act(req, sessions, 0, Action::Fill(text.clone()), "filled"),
+            None => Err("fill needs a ref and text".into()),
+        },
+        "press" => match req.args.first() {
+            Some(key) => act(req, sessions, 1, Action::Press(key.clone()), "pressed"),
+            None => Err("press needs a key".into()),
+        },
+        "text" => with_session(req, sessions, |a| a.text()),
+        "wait" => wait(req, sessions),
         "close" => {
             let mut map = sessions.lock().unwrap();
             let r = match map.remove(&req.session) {
@@ -95,27 +107,64 @@ fn no_session(name: &str) -> String {
 
 fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
     let url = normalize_url(req.args.first().ok_or("open needs a URL")?);
+    let mut created = false;
     let session = {
         let mut map = sessions.lock().unwrap();
         match map.get(&req.session) {
             Some(s) => s.clone(),
             None => {
+                created = true;
                 // ponytail: launches while holding the map lock (about a second); per-session init if that hurts.
-                let s: Session = Arc::new(Mutex::new(Box::new(Chromium::launch().map_err(|e| e.to_string())?)));
+                let s: Session = Arc::new(Mutex::new(Box::new(Chromium::launch(req.headed).map_err(|e| e.to_string())?)));
                 map.insert(req.session.clone(), s.clone());
                 s
             }
         }
     };
     session.lock().unwrap().open(&url).map_err(|e| e.to_string())?;
-    Ok(format!("opened {url}"))
+    Ok(if req.headed && !created {
+        format!("opened {url} (session '{}' was already running headless; close it first to get a window)", req.session)
+    } else {
+        format!("opened {url}")
+    })
 }
 
-fn with_session(
+/// Runs an action; `ref_at` is the args index of the optional target ref.
+fn act(req: &Request, sessions: &Sessions, ref_at: usize, action: Action, done: &str) -> Result<String, String> {
+    let target = req.args.get(ref_at).map(|r| r.trim_start_matches('@').to_string());
+    with_session(req, sessions, |a| a.act(target.as_deref(), &action))?;
+    let what = match (&action, &target) {
+        (Action::Press(k), Some(r)) => format!("{k} on @{r}"),
+        (Action::Press(k), None) => k.clone(),
+        (_, Some(r)) => format!("@{r}"),
+        (_, None) => String::new(),
+    };
+    Ok(format!("{done} {what}"))
+}
+
+/// args: [kind, value, timeout_ms] with kind ms | text | url.
+fn wait(req: &Request, sessions: &Sessions) -> Result<String, String> {
+    let (kind, value) = (req.args.first().map(String::as_str), req.args.get(1).cloned().unwrap_or_default());
+    let timeout = Duration::from_millis(req.args.get(2).and_then(|t| t.parse().ok()).unwrap_or(10_000));
+    let cond = match kind {
+        Some("ms") => Wait::Ms(value.parse().map_err(|_| format!("bad milliseconds '{value}'"))?),
+        Some("text") => Wait::Text(value.clone()),
+        Some("url") => Wait::Url(value.clone()),
+        _ => return Err("wait needs <ms>, --text <text> or --url <part>".into()),
+    };
+    with_session(req, sessions, |a| a.wait(&cond, timeout))?;
+    Ok(match cond {
+        Wait::Ms(ms) => format!("waited {ms} ms"),
+        Wait::Text(t) => format!("found text {t:?}"),
+        Wait::Url(u) => format!("URL contains {u:?}"),
+    })
+}
+
+fn with_session<T>(
     req: &Request,
     sessions: &Sessions,
-    f: impl FnOnce(&mut Box<dyn Adapter + Send>) -> klyro_core::Result<String>,
-) -> Result<String, String> {
+    f: impl FnOnce(&mut Box<dyn Adapter + Send>) -> klyro_core::Result<T>,
+) -> Result<T, String> {
     let s = sessions.lock().unwrap().get(&req.session).cloned().ok_or_else(|| no_session(&req.session))?;
     let mut a = s.lock().unwrap();
     f(&mut a).map_err(|e| e.to_string())

@@ -1,5 +1,6 @@
 use crate::Snapshot;
 use std::fmt;
+use std::time::Duration;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -45,6 +46,16 @@ pub enum Action {
     Press(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Wait {
+    /// Fixed delay.
+    Ms(u64),
+    /// Until the page text contains this.
+    Text(String),
+    /// Until the URL contains this.
+    Url(String),
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ScreenshotOptions {
     pub full_page: bool,
@@ -64,6 +75,8 @@ pub trait Adapter {
     fn act(&mut self, target: Option<&str>, action: &Action) -> Result<()>;
     /// Readable text of the current page, not markup.
     fn text(&mut self) -> Result<String>;
+    /// Block until the condition holds or `timeout` passes.
+    fn wait(&mut self, cond: &Wait, timeout: Duration) -> Result<()>;
     /// PNG bytes.
     fn screenshot(&mut self, _opts: &ScreenshotOptions) -> Result<Vec<u8>> {
         Err(Error::Unsupported("screenshot"))
