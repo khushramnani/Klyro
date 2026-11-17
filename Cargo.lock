@@ -239,6 +239,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "spike-lightpanda"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "tungstenite",
+]
+
+[[package]]
 name = "syn"
 version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
