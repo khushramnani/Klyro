@@ -52,6 +52,15 @@ impl Router {
         std::mem::take(&mut self.unreported)
     }
 
+    /// The last snapshot taken in this session, if any.
+    pub fn last_snapshot(&self) -> Option<&Snapshot> {
+        self.last_snapshot.as_ref()
+    }
+
+    pub fn status_json(&self) -> serde_json::Value {
+        serde_json::json!({ "lane": self.lane().to_string(), "auto": self.auto, "switches": self.switches })
+    }
+
     pub fn status(&self) -> String {
         let mode = if self.auto { "auto" } else { "pinned by --engine" };
         let mut s = format!("lane: {} ({mode})", self.lane());

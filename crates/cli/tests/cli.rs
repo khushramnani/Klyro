@@ -65,9 +65,14 @@ fn login_flow_on(engine: &'static str) {
     let (user, pass, submit) = (ref_of(&snap, "Username"), ref_of(&snap, "Password"), ref_of(&snap, "Log in"));
 
     // Wrong password via click: the page shows an error, and the old refs are stale.
-    assert_eq!(k.ok(&["fill", &user, "demo"]).trim(), format!("filled @{user}"));
+    let out = k.ok(&["fill", &user, "demo"]);
+    assert_eq!(first(&out), format!("filled @{user}"));
+    assert_eq!(out.lines().count(), 2, "fill reports only the changed field: {out}");
+    assert!(out.contains(&format!("~ textbox \"Username\" [ref={user}] [value=\"demo\"]")), "{out}");
     k.ok(&["fill", &pass, "nope"]);
-    assert_eq!(k.ok(&["click", &submit]).trim(), format!("clicked @{submit}"));
+    let out = k.ok(&["click", &submit]);
+    assert_eq!(first(&out), format!("clicked @{submit}"));
+    assert!(out.contains("page changed:") && out.contains("Wrong username or password"), "{out}");
     assert!(k.ok(&["text"]).contains("Wrong username or password"));
     assert!(k.fails(&["fill", &user, "demo"]).contains("stale ref"));
 
@@ -75,17 +80,23 @@ fn login_flow_on(engine: &'static str) {
     let snap = k.ok(&["snapshot"]);
     k.ok(&["fill", &ref_of(&snap, "Username"), "demo"]);
     k.ok(&["fill", &ref_of(&snap, "Password"), "secret"]);
-    assert_eq!(k.ok(&["press", "Enter", &ref_of(&snap, "Password")]).trim(), format!("pressed Enter on @{}", ref_of(&snap, "Password")));
+    let out = k.ok(&["press", "Enter", &ref_of(&snap, "Password")]);
+    assert_eq!(first(&out), format!("pressed Enter on @{}", ref_of(&snap, "Password")));
     k.ok(&["wait", "--url", "/dashboard"]);
 
     // `text` is readable text, not HTML.
     let text = k.ok(&["text"]);
     assert!(text.contains("You are logged in.") && !text.contains("<p>"), "{text}");
 
-    // fill fires real input events (the page echoes the field on `input`).
+    // fill fires real input events (the page echoes the field on `input`), and the diff shows the echo.
     let snap = k.ok(&["snapshot"]);
-    k.ok(&["fill", &ref_of(&snap, "Note"), "hello"]);
+    let out = k.ok(&["fill", &ref_of(&snap, "Note"), "hello"]);
     k.ok(&["wait", "--text", "Note says: hello", "--timeout", "3000"]);
+    assert!(out.lines().count() <= 4 && out.contains("hello"), "small diff expected: {out}");
+}
+
+fn first(out: &str) -> &str {
+    out.lines().next().unwrap_or("")
 }
 
 #[test]
@@ -180,4 +191,62 @@ fn status_shows_lane_and_switch_note() {
 
     let status = k.ok(&["status"]);
     assert!(status.contains("lane: chromium (auto)") && status.contains("screenshot needs it"), "{status}");
+}
+
+#[test]
+fn snapshot_interactive_and_json_everywhere() {
+    let app = demo_app();
+    let k = Klyro::with_engine("json", "chromium");
+    let opened: serde_json::Value = serde_json::from_str(&k.ok(&["--json", "open", &format!("{app}/login")])).unwrap();
+    assert_eq!(opened["opened"], format!("{app}/login"));
+
+    let i = k.ok(&["snapshot", "-i"]);
+    assert!(i.lines().all(|l| l.starts_with("- ") && l.contains("[ref=")), "flat, refs only: {i}");
+    assert!(i.contains("textbox \"Username\"") && !i.contains("heading"), "{i}");
+
+    let user = ref_of(&i, "Username");
+    let filled: serde_json::Value = serde_json::from_str(&k.ok(&["--json", "fill", &user, "demo"])).unwrap();
+    assert_eq!(filled["done"], "filled");
+    assert_eq!(filled["diff"]["changed"][0]["value"], "demo");
+
+    for args in [&["--json", "text"][..], &["--json", "status"], &["--json", "wait", "10"]] {
+        let out = k.ok(args);
+        assert!(serde_json::from_str::<serde_json::Value>(&out).is_ok(), "{args:?} is not JSON: {out}");
+    }
+    let closed: serde_json::Value = serde_json::from_str(&k.ok(&["--json", "close"])).unwrap();
+    assert_eq!(closed["closed"], "default");
+}
+
+/// Tokens an agent reads per step: before = the action line plus a full snapshot to see what
+/// happened; after = Klyro's action output (a diff). Run with --nocapture to see the table.
+#[test]
+fn token_budget() {
+    let tokens = |s: &str| s.len().div_ceil(4); // ponytail: ~4 chars per token; a real tokenizer if this gets tuned
+    let app = demo_app();
+    let k = Klyro::with_engine("tokens", "chromium");
+    k.ok(&["open", &format!("{app}/login")]);
+    let snap = k.ok(&["snapshot"]);
+    let (user, pass) = (ref_of(&snap, "Username"), ref_of(&snap, "Password"));
+
+    let mut rows = vec![];
+    let mut step = |name: &str, args: &[&str]| {
+        let out = k.ok(args);
+        let full = k.ok(&["snapshot"]);
+        rows.push((name.to_string(), tokens(first(&out)) + tokens(&full), tokens(&out)));
+    };
+    step("fill username", &["fill", &user, "demo"]);
+    step("fill password", &["fill", &pass, "secret"]);
+    step("press Enter (navigates)", &["press", "Enter"]);
+    let note = ref_of(&k.ok(&["snapshot"]), "Note");
+    step("fill note", &["fill", &note, "hello"]);
+
+    eprintln!("
+| step | before (action + snapshot) | after (diff) |
+|---|---|---|");
+    for (n, b, a) in &rows {
+        eprintln!("| {n} | {b} | {a} |");
+    }
+    let (b, a): (usize, usize) = rows.iter().fold((0, 0), |(x, y), r| (x + r.1, y + r.2));
+    eprintln!("| total | {b} | {a} |");
+    assert!(a * 2 < b, "diffs should at least halve the tokens: {a} vs {b}");
 }

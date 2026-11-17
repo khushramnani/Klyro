@@ -12,6 +12,8 @@ const REF_ROLES: &[&str] = &[
     "link", "button", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "option",
     "menuitem", "menuitemcheckbox", "menuitemradio", "tab", "switch", "slider", "spinbutton", "heading",
 ];
+/// Their AX children only repeat the typed value.
+const TEXT_FIELDS: &[&str] = &["textbox", "searchbox", "spinbutton"];
 /// Dropped with their subtree.
 const DROP: &[&str] = &["InlineTextBox", "LineBreak"];
 /// Not printed; their children move up one level.
@@ -62,7 +64,10 @@ impl Walk<'_> {
         if !value.is_empty() && value != name {
             node.value = Some(value);
         }
-        node.children = self.children(n, &name);
+        // A text field's children are its own editor text, which repeats the value.
+        if !TEXT_FIELDS.contains(&role) {
+            node.children = self.children(n, &name);
+        }
         vec![node]
     }
 

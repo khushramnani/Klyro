@@ -6,7 +6,8 @@ pub mod router;
 use ipc::{Info, Request, Response};
 use klyro_adapter_web::Engine;
 use router::Router;
-use klyro_core::{Action, Adapter, ScreenshotOptions, Wait};
+use klyro_core::{Action, Adapter, ScreenshotOptions, Wait, diff};
+use serde_json::{Value, json};
 use std::time::Duration;
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, Write};
@@ -65,7 +66,10 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
     let result = match req.cmd.as_str() {
         "open" => open(req, sessions),
         "snapshot" => with_session(req, sessions, |a| {
-            let s = a.snapshot()?;
+            let mut s = a.snapshot()?;
+            if req.args.iter().any(|x| x == "interactive") {
+                s = s.interactive();
+            }
             Ok(if req.json { s.to_json() } else { s.to_text().trim_end().to_string() })
         }),
         "click" => act(req, sessions, 0, Action::Click, "clicked"),
@@ -77,8 +81,8 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
             Some(key) => act(req, sessions, 1, Action::Press(key.clone()), "pressed"),
             None => Err("press needs a key".into()),
         },
-        "text" => with_session(req, sessions, |a| a.text()),
-        "status" => with_session(req, sessions, |a| Ok(a.status())),
+        "text" => with_session(req, sessions, |a| a.text()).map(|t| reply(req, t.clone(), json!({ "text": t }))),
+        "status" => with_session(req, sessions, |a| Ok(reply(req, a.status(), a.status_json()))),
         "screenshot" => screenshot(req, sessions),
         "wait" => wait(req, sessions),
         "close" => {
@@ -86,7 +90,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
             let r = match map.remove(&req.session) {
                 Some(s) => {
                     let _ = s.lock().unwrap().close();
-                    Ok(format!("closed session {}", req.session))
+                    Ok(reply(req, format!("closed session {}", req.session), json!({ "closed": req.session })))
                 }
                 None => Err(no_session(&req.session)),
             };
@@ -133,24 +137,57 @@ fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
         }
     };
     session.lock().unwrap().open(&url).map_err(|e| e.to_string())?;
-    Ok(if req.headed && !created {
+    let text = if req.headed && !created {
         format!("opened {url} (session '{}' was already running headless; close it first to get a window)", req.session)
     } else {
         format!("opened {url}")
-    })
+    };
+    Ok(reply(req, text, json!({ "opened": url })))
 }
 
-/// Runs an action; `ref_at` is the args index of the optional target ref.
+/// Text or JSON, as the caller asked.
+fn reply(req: &Request, text: String, json: Value) -> String {
+    if req.json { json.to_string() } else { text }
+}
+
+/// Runs an action and reports what it changed on the page, not the whole page.
+/// `ref_at` is the args index of the optional target ref.
 fn act(req: &Request, sessions: &Sessions, ref_at: usize, action: Action, done: &str) -> Result<String, String> {
     let target = req.args.get(ref_at).map(|r| r.trim_start_matches('@').to_string());
-    with_session(req, sessions, |a| a.act(target.as_deref(), &action))?;
     let what = match (&action, &target) {
         (Action::Press(k), Some(r)) => format!("{k} on @{r}"),
         (Action::Press(k), None) => k.clone(),
         (_, Some(r)) => format!("@{r}"),
         (_, None) => String::new(),
     };
-    Ok(format!("{done} {what}"))
+    with_session(req, sessions, |a| {
+        // Compare with what the agent last saw; take a snapshot first if it saw nothing yet.
+        let before = match a.last_snapshot() {
+            Some(s) => s.clone(),
+            None => a.snapshot()?,
+        };
+        a.act(target.as_deref(), &action)?;
+        let head = format!("{done} {what}");
+        let after = match a.snapshot() {
+            Ok(s) => s,
+            // The action happened; only reading the result failed.
+            Err(e) => return Ok(reply(req, format!("{head}
+(could not read the page afterwards: {e})"), json!({ "done": done, "target": target }))),
+        };
+        let d = diff(&before, &after);
+        let (text, json) = if d.is_page_change() {
+            (format!("{head}
+page changed: {}
+{}", after.url, after.to_text()), json!({ "done": done, "target": target, "page_changed": true, "snapshot": after }))
+        } else if d.is_empty() {
+            (format!("{head}
+no visible change"), json!({ "done": done, "target": target, "diff": d }))
+        } else {
+            (format!("{head}
+{}", d.to_text()), json!({ "done": done, "target": target, "diff": d }))
+        };
+        Ok(reply(req, text.trim_end().to_string(), json))
+    })
 }
 
 /// args: [absolute path, "full" | "ref=<ref>" ...]
@@ -194,11 +231,12 @@ fn wait(req: &Request, sessions: &Sessions) -> Result<String, String> {
         _ => return Err("wait needs <ms>, --text <text> or --url <part>".into()),
     };
     with_session(req, sessions, |a| a.wait(&cond, timeout))?;
-    Ok(match cond {
+    let text = match &cond {
         Wait::Ms(ms) => format!("waited {ms} ms"),
         Wait::Text(t) => format!("found text {t:?}"),
         Wait::Url(u) => format!("URL contains {u:?}"),
-    })
+    };
+    Ok(reply(req, text.clone(), json!({ "waited": text })))
 }
 
 fn with_session<T>(

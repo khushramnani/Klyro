@@ -43,6 +43,20 @@ impl Snapshot {
         out
     }
 
+    /// A snapshot of just one node (children included), for printing it.
+    pub fn single(n: &Node) -> Snapshot {
+        Snapshot { url: String::new(), title: String::new(), nodes: vec![n.clone()] }
+    }
+
+    /// Interactive elements only (refs, minus headings), as a flat list.
+    pub fn interactive(&self) -> Snapshot {
+        let nodes = crate::diff::flatten(&self.nodes)
+            .into_iter()
+            .filter(|n| n.r#ref.is_some() && n.role != "heading")
+            .collect();
+        Snapshot { url: self.url.clone(), title: self.title.clone(), nodes }
+    }
+
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("snapshot is always serializable")
     }
@@ -98,6 +112,11 @@ mod tests {
                - text: Enter your name\n  \
                - textbox \"Username\" [ref=e2] [value=\"tom\"]\n"
         );
+    }
+
+    #[test]
+    fn interactive_is_flat_refs_without_headings() {
+        assert_eq!(sample().interactive().to_text(), "- textbox \"Username\" [ref=e2] [value=\"tom\"]\n");
     }
 
     #[test]

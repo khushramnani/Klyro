@@ -101,3 +101,29 @@ dispatchKeyEvent/dispatchMouseEvent`, `Runtime.evaluate`, `Network.getCookies/se
 Both spikes produce the same snapshot shape. Lightpanda gives a usable snapshot on all three
 site kinds. Recommendation: **go on the fast lane**, with JS clicks and every screenshot on
 Chromium.
+
+## Task 9: compact output, tokens per step (2026-11-17)
+
+Tokens ≈ characters / 4. "Before" is what an agent read to see an action's result before
+Task 9: the action line plus a full `snapshot`. "After" is the action's own output: a diff, or
+the full page when the action loaded a new document.
+
+Demo app flow (`cargo test -p klyro-cli --test cli token_budget -- --nocapture`):
+
+| step | before | after |
+|---|---|---|
+| fill username | 79 | 14 |
+| fill password | 87 | 18 |
+| press Enter (navigates) | 46 | 57 |
+| fill note | 53 | 17 |
+| total | 265 | 106 (-60%) |
+
+Real page, digitalbeauty.io (full snapshot ≈ 2,110 tokens):
+
+| step | before | after |
+|---|---|---|
+| click "I decline" on the cookie dialog | 1,927 | 204 (-89%) |
+| click a filter (loads a new feed) | 1,909 | 1,925 (full page, by design) |
+
+Diffs save the most on in-page changes (dialogs, form fields, validation messages). On
+navigation the output is the new page, which the agent needs anyway.

@@ -34,7 +34,11 @@ enum Cmd {
         engine: Option<String>,
     },
     /// Print the page as a tree with refs, e.g. `- button "Login" [ref=e3]`.
-    Snapshot,
+    Snapshot {
+        /// Interactive elements only, as a flat list.
+        #[arg(short, long)]
+        interactive: bool,
+    },
     /// Click an element.
     Click {
         #[arg(value_name = "REF")]
@@ -107,7 +111,7 @@ fn main() -> ExitCode {
             engine = e;
             ("open", vec![url])
         }
-        Cmd::Snapshot => ("snapshot", vec![]),
+        Cmd::Snapshot { interactive } => ("snapshot", if interactive { vec!["interactive".into()] } else { vec![] }),
         Cmd::Click { target } => ("click", vec![target]),
         Cmd::Fill { target, text } => ("fill", vec![target, text]),
         Cmd::Press { key, target } => ("press", [Some(key), target].into_iter().flatten().collect()),
