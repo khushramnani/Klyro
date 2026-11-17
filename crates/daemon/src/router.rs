@@ -23,10 +23,12 @@ pub struct Router {
 }
 
 impl Router {
-    /// `engine: None` = automatic lanes.
-    pub fn start(engine: Option<Engine>, headed: bool) -> Result<Self> {
+    /// `engine: None` = automatic lanes. `visual_first`: the first step is known to need the
+    /// visual lane (a document), so skip starting the fast lane just to leave it.
+    pub fn start(engine: Option<Engine>, headed: bool, visual_first: bool) -> Result<Self> {
         let auto = engine.is_none();
-        let first = engine.unwrap_or(if !headed && find_lightpanda().is_some() { Engine::Lightpanda } else { Engine::Chromium });
+        let fast = !headed && !visual_first && find_lightpanda().is_some();
+        let first = engine.unwrap_or(if fast { Engine::Lightpanda } else { Engine::Chromium });
         let mut switches = vec![];
         let page = match WebPage::launch(first, headed) {
             Ok(p) => p,

@@ -3,6 +3,7 @@
 mod attach;
 mod ax;
 mod cdp;
+mod docs;
 mod chromium;
 mod engine;
 mod handoff;

@@ -131,7 +131,8 @@ fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
             None => {
                 created = true;
                 // ponytail: launches while holding the map lock (about a second); per-session init if that hurts.
-                let s: Session = Arc::new(Mutex::new(Router::start(engine, req.headed).map_err(|e| e.to_string())?));
+                let is_doc = std::path::Path::new(&url).is_file();
+                let s: Session = Arc::new(Mutex::new(Router::start(engine, req.headed, is_doc).map_err(|e| e.to_string())?));
                 map.insert(req.session.clone(), s.clone());
                 s
             }
@@ -205,13 +206,14 @@ no change yet (run `wait` or `snapshot` if the page updates later)"), json!({ "d
     })
 }
 
-/// args: [absolute path, "full" | "ref=<ref>" ...]
+/// args: [absolute path, "full" | "ref=<ref>" | "page=<n>" ...]
 fn screenshot(req: &Request, sessions: &Sessions) -> Result<String, String> {
     let path = req.args.first().ok_or("screenshot needs a file path")?;
     let mut opts = ScreenshotOptions::default();
     for a in &req.args[1..] {
         match a.split_once('=') {
             Some(("ref", r)) => opts.target = Some(r.trim_start_matches('@').to_string()),
+            Some(("page", n)) => opts.page = Some(n.parse().map_err(|_| format!("bad page number {n}"))?),
             _ if a == "full" => opts.full_page = true,
             _ => return Err(format!("bad screenshot option {a}")),
         }
@@ -264,9 +266,9 @@ fn with_session<T>(
     f(&mut a).map_err(|e| e.to_string())
 }
 
-/// `example.com` -> `https://example.com`; anything with a scheme is left alone.
+/// `example.com` -> `https://example.com`; anything with a scheme, or a local file, is left alone.
 fn normalize_url(u: &str) -> String {
-    if u.contains("://") || u.starts_with("about:") || u.starts_with("data:") {
+    if u.contains("://") || u.starts_with("about:") || u.starts_with("data:") || std::path::Path::new(u).is_file() {
         u.to_string()
     } else {
         format!("https://{u}")

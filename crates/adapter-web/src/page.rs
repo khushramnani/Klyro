@@ -3,6 +3,7 @@
 
 use crate::ax::{self, Handle};
 use crate::cdp::{Cdp, engine_err};
+use crate::docs::{self, DocKind};
 use crate::engine::{Engine, Proc};
 use crate::keys;
 use klyro_core::{Action, Adapter, Capabilities, Error, RefMap, Result, ScreenshotOptions, Snapshot, Wait};
@@ -53,6 +54,23 @@ impl WebPage {
 
     pub fn engine(&self) -> Engine {
         self.engine
+    }
+
+    fn navigate(&mut self, url: &str) -> Result<()> {
+        self.cdp.clear_events();
+        let r = self.cdp.call("Page.navigate", json!({ "url": url }))?;
+        if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
+            return Err(Error::Engine(format!("could not open {url}: {e}")));
+        }
+        // ponytail: a page that never fires load is snapshotted as-is after the timeout.
+        self.cdp.wait_for(|e| e["method"] == "Page.loadEventFired", LOAD_TIMEOUT)?;
+        Ok(())
+    }
+
+    /// Page texts when the page is a rendered PDF.
+    fn pdf_text(&mut self) -> Result<Option<Vec<String>>> {
+        let v = self.eval("window.klyro && window.klyro.ready ? window.klyro.text : null")?;
+        Ok(v.as_array().map(|a| a.iter().map(|t| t.as_str().unwrap_or("").to_string()).collect()))
     }
 
     pub(crate) fn eval(&mut self, expr: &str) -> Result<Value> {
@@ -197,14 +215,19 @@ impl Adapter for WebPage {
         Capabilities { pixels: self.engine.has_layout(), structure: true }
     }
 
-    fn open(&mut self, url: &str) -> Result<()> {
-        self.cdp.clear_events();
-        let r = self.cdp.call("Page.navigate", json!({ "url": url }))?;
-        if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
-            return Err(Error::Engine(format!("could not open {url}: {e}")));
+    fn open(&mut self, target: &str) -> Result<()> {
+        let Some((kind, path)) = docs::doc_kind(target)? else { return self.navigate(target) };
+        if !self.engine.has_layout() {
+            return Err(Error::Unsupported("opening documents on the lightpanda engine (they render on the visual lane)"));
         }
-        // ponytail: a page that never fires load is snapshotted as-is after the timeout.
-        self.cdp.wait_for(|e| e["method"] == "Page.loadEventFired", LOAD_TIMEOUT)?;
+        let url = docs::register(kind, path)?;
+        self.navigate(&url)?;
+        if kind == DocKind::Pdf {
+            self.poll(LOAD_TIMEOUT, "the PDF to render", |p| Ok(p.eval("!!(window.klyro && window.klyro.ready)")? == json!(true)))?;
+            if let Some(e) = self.eval("window.klyro.error")?.as_str() {
+                return Err(Error::Engine(format!("could not read the PDF: {e}")));
+            }
+        }
         Ok(())
     }
 
@@ -255,10 +278,19 @@ impl Adapter for WebPage {
         if !self.engine.has_layout() {
             return Err(Error::Unsupported("screenshot on the lightpanda engine (no real pixels); use --engine chromium"));
         }
-        if opts.page.is_some() {
-            return Err(Error::Invalid("screenshot --page is for documents, not web pages".into()));
-        }
         let mut params = json!({ "format": "png" });
+        if let Some(n) = opts.page {
+            let pages = self.pdf_text()?.ok_or_else(|| Error::Invalid("screenshot --page is for PDF documents".into()))?.len();
+            if n == 0 || n as usize > pages {
+                return Err(Error::Invalid(format!("this PDF has {pages} page(s); --page {n} does not exist")));
+            }
+            let r = self.eval(&format!(
+                "(() => {{ const r = document.getElementById('page-{n}').getBoundingClientRect();                    return [r.left + scrollX, r.top + scrollY, r.width, r.height]; }})()"
+            ))?;
+            let r: Vec<f64> = r.as_array().into_iter().flatten().filter_map(Value::as_f64).collect();
+            params["clip"] = json!({ "x": r[0], "y": r[1], "width": r[2], "height": r[3], "scale": 1 });
+            params["captureBeyondViewport"] = json!(true);
+        }
         if let Some(r) = &opts.target {
             let b = self.node(r)?;
             self.cdp.call("DOM.scrollIntoViewIfNeeded", json!({ "backendNodeId": b }))?;
@@ -299,6 +331,13 @@ impl Adapter for WebPage {
     }
 
     fn text(&mut self) -> Result<String> {
+        if let Some(pages) = self.pdf_text()? {
+            let parts: Vec<String> = pages.iter().enumerate().map(|(i, t)| format!("--- page {} ---
+{t}", i + 1)).collect();
+            return Ok(parts.join("
+
+"));
+        }
         let v = self.eval("document.body ? document.body.innerText : ''")?;
         Ok(v.as_str().unwrap_or("").trim().to_string())
     }

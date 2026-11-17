@@ -45,7 +45,7 @@ fn router_login_on_fast_lane_then_screenshot_shows_logged_in_page() {
         return;
     }
     let app = demo_app();
-    let mut r = Router::start(None, false).unwrap();
+    let mut r = Router::start(None, false, false).unwrap();
     assert_eq!(r.lane(), Engine::Lightpanda, "auto sessions start on the fast lane");
 
     log_in(&mut r, &app);
@@ -71,7 +71,7 @@ fn router_maps_refs_across_a_switch() {
         return;
     }
     let app = demo_app();
-    let mut r = Router::start(None, false).unwrap();
+    let mut r = Router::start(None, false, false).unwrap();
     r.open(&format!("{app}/login")).unwrap();
     let s = r.snapshot().unwrap();
     let user = find(&s.nodes, "textbox", "Username").unwrap();
@@ -94,7 +94,7 @@ fn router_off_when_engine_is_pinned() {
     if !have_lightpanda() {
         return;
     }
-    let mut r = Router::start(Some(Engine::Lightpanda), false).unwrap();
+    let mut r = Router::start(Some(Engine::Lightpanda), false, false).unwrap();
     r.open(&format!("{}/login", demo_app())).unwrap();
     assert!(matches!(r.screenshot(&ScreenshotOptions::default()), Err(Error::Unsupported(_))));
     assert_eq!(r.lane(), Engine::Lightpanda);
@@ -109,7 +109,7 @@ fn router_timeouts_do_not_switch() {
     if !have_lightpanda() {
         return;
     }
-    let mut r = Router::start(None, false).unwrap();
+    let mut r = Router::start(None, false, false).unwrap();
     r.open(&format!("{}/login", demo_app())).unwrap();
     let res = r.wait(&Wait::Text("never there".into()), Duration::from_millis(300));
     assert!(matches!(res, Err(Error::Timeout(_))), "{res:?}");

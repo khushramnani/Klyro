@@ -22,7 +22,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Open a URL (starts the session if needed).
+    /// Open a URL, or a local PDF, Markdown or HTML file (starts the session if needed).
     Open {
         url: String,
         /// Show a real browser window, to watch or debug. Only applies when the session starts.
@@ -69,8 +69,11 @@ enum Cmd {
         #[arg(long, conflicts_with = "target")]
         full: bool,
         /// Only this element.
-        #[arg(long = "ref", value_name = "REF")]
+        #[arg(long = "ref", value_name = "REF", conflicts_with = "page")]
         target: Option<String>,
+        /// Only this page of a PDF (1-based).
+        #[arg(long, conflicts_with = "full")]
+        page: Option<u32>,
     },
     /// Wait for a delay, some text, or a URL.
     #[command(group(ArgGroup::new("until").required(true).args(["ms", "text", "url"])))]
@@ -112,6 +115,11 @@ fn main() -> ExitCode {
         Cmd::Open { url, headed: h, engine: e } => {
             headed = h;
             engine = e;
+            // A local document: the daemon runs elsewhere, so send an absolute path.
+            let url = match std::path::Path::new(&url) {
+                p if p.is_file() => std::path::absolute(p).map(|p| p.display().to_string()).unwrap_or(url),
+                _ => url,
+            };
             ("open", vec![url])
         }
         Cmd::Snapshot { interactive } => ("snapshot", if interactive { vec!["interactive".into()] } else { vec![] }),
@@ -119,7 +127,7 @@ fn main() -> ExitCode {
         Cmd::Fill { target, text } => ("fill", vec![target, text]),
         Cmd::Press { key, target } => ("press", [Some(key), target].into_iter().flatten().collect()),
         Cmd::Text => ("text", vec![]),
-        Cmd::Screenshot { path, full, target } => {
+        Cmd::Screenshot { path, full, target, page } => {
             // The daemon writes the file, so resolve relative paths against our cwd.
             let path = std::env::current_dir().map(|d| d.join(&path)).unwrap_or(path);
             let mut args = vec![path.display().to_string()];
@@ -128,6 +136,9 @@ fn main() -> ExitCode {
             }
             if let Some(r) = target {
                 args.push(format!("ref={r}"));
+            }
+            if let Some(n) = page {
+                args.push(format!("page={n}"));
             }
             ("screenshot", args)
         }

@@ -9,3 +9,4 @@ license.workspace = true
 klyro-core.workspace = true
 serde_json.workspace = true
 tungstenite.workspace = true
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

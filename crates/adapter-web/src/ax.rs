@@ -15,7 +15,7 @@ const REF_ROLES: &[&str] = &[
 /// Their AX children only repeat the typed value.
 const TEXT_FIELDS: &[&str] = &["textbox", "searchbox", "spinbutton"];
 /// Dropped with their subtree.
-const DROP: &[&str] = &["InlineTextBox", "LineBreak"];
+const DROP: &[&str] = &["InlineTextBox", "LineBreak", "ListMarker"];
 /// Not printed; their children move up one level.
 const FLATTEN: &[&str] = &["generic", "none", "RootWebArea", "WebArea", "LabelText", "presentation"];
 

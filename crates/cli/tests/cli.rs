@@ -2,6 +2,7 @@
 
 mod common;
 use common::{Klyro, demo_app, have_lightpanda, ref_of};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 #[test]
@@ -353,4 +354,48 @@ fn electron_connect_snapshot_click_screenshot() {
     k.ok(&["--session", "a", "close"]);
     std::thread::sleep(Duration::from_millis(500));
     assert!(std::net::TcpStream::connect(("127.0.0.1", port.parse::<u16>().unwrap())).is_ok(), "app must still run");
+}
+
+fn fixture(name: &str) -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/docs").join(name).display().to_string()
+}
+
+#[test]
+fn documents_pdf_markdown_html() {
+    let k = Klyro::new("docs");
+
+    // PDF: text per page, one page as an image.
+    k.ok(&["open", &fixture("three-pages.pdf")]);
+    let text = k.ok(&["text"]);
+    assert!(text.contains("--- page 2 ---\nThe second page says hello"), "{text}");
+    assert!(text.contains("--- page 3 ---\nPage three is the last page"), "{text}");
+    assert!(k.ok(&["snapshot"]).contains("heading \"Page 3\""));
+    let p2 = k.home.join("p2.png");
+    k.ok(&["screenshot", "--page", "2", p2.to_str().unwrap()]);
+    assert_eq!(png_dims(&p2), (918, 1188), "US Letter at 1.5x");
+    assert!(k.fails(&["screenshot", "--page", "4", p2.to_str().unwrap()]).contains("this PDF has 3 page(s)"));
+
+    // Markdown: rendered, relative images load from the document's folder.
+    k.ok(&["open", &fixture("notes.md")]);
+    let snap = k.ok(&["snapshot"]);
+    assert!(snap.contains("heading \"Release notes\"") && snap.contains("cell \"42\""), "{snap}");
+    assert!(!snap.contains("ListMarker"), "{snap}");
+    let loaded = k.ok(&["--json", "text"]);
+    assert!(loaded.contains("Item two"), "{loaded}");
+    assert!(k.fails(&["screenshot", "--page", "1", p2.to_str().unwrap()]).contains("--page is for PDF documents"));
+
+    // HTML file, opened by a relative path from the CLI's folder.
+    let out = Command::new(env!("CARGO_BIN_EXE_klyro"))
+        .args(["open", "page.html"])
+        .current_dir(std::path::Path::new(&fixture("page.html")).parent().unwrap())
+        .env("KLYRO_HOME", &k.home)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(k.ok(&["snapshot"]).contains("button \"Press me\""));
+
+    // Office files: a clear "not yet", and no lane switch for it.
+    let deck = k.home.join("deck.pptx");
+    std::fs::write(&deck, b"x").unwrap();
+    assert!(k.fails(&["open", deck.to_str().unwrap()]).contains(".pptx files are not supported yet"));
 }
