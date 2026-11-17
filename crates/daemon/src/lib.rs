@@ -65,6 +65,7 @@ fn err(m: impl Into<String>) -> Response {
 fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
     let result = match req.cmd.as_str() {
         "open" => open(req, sessions),
+        "connect" => connect(req, sessions),
         "snapshot" => with_session(req, sessions, |a| {
             let mut s = a.snapshot()?;
             if req.args.iter().any(|x| x == "interactive") {
@@ -143,6 +144,20 @@ fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
         format!("opened {url}")
     };
     Ok(reply(req, text, json!({ "opened": url })))
+}
+
+/// Attach a session to an app already running with a DevTools port (Electron).
+fn connect(req: &Request, sessions: &Sessions) -> Result<String, String> {
+    let port: u16 = req.args.first().and_then(|p| p.parse().ok()).ok_or("connect needs a port number")?;
+    let mut map = sessions.lock().unwrap();
+    if map.contains_key(&req.session) {
+        return Err(format!("session '{}' already exists: close it or pick another with --session", req.session));
+    }
+    let mut router = Router::attach(port).map_err(|e| e.to_string())?;
+    let snap = router.snapshot().map_err(|e| e.to_string())?;
+    map.insert(req.session.clone(), Arc::new(Mutex::new(router)));
+    let title = if snap.title.is_empty() { snap.url.clone() } else { snap.title.clone() };
+    Ok(reply(req, format!("connected to port {port}: {title}"), json!({ "connected": port, "url": snap.url, "title": snap.title })))
 }
 
 /// Text or JSON, as the caller asked.

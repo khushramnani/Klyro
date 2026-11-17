@@ -56,6 +56,11 @@ impl Cdp {
     }
 
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value> {
+        self.call_timeout(method, params, CALL_TIMEOUT)
+    }
+
+    /// Like `call`, with its own deadline. A reply that arrives later is ignored.
+    pub fn call_timeout(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
         self.next += 1;
         let id = self.next;
         let mut msg = json!({ "id": id, "method": method, "params": params });
@@ -63,7 +68,7 @@ impl Cdp {
             msg["sessionId"] = json!(s);
         }
         self.ws.send(Message::text(msg.to_string())).map_err(engine_err)?;
-        let end = Instant::now() + CALL_TIMEOUT;
+        let end = Instant::now() + timeout;
         while Instant::now() < end {
             let Some(v) = self.read()? else { continue };
             if v["id"] == id {

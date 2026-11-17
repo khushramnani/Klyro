@@ -39,6 +39,12 @@ impl Router {
         Ok(Router { page, auto, headed, unreported: switches.clone(), switches, last_snapshot: None, before_switch: None, lane_ref_start: 1 })
     }
 
+    /// A session on an app that is already running (e.g. Electron). Pinned: no lane switching.
+    pub fn attach(port: u16) -> Result<Self> {
+        let page = WebPage::attach(port)?;
+        Ok(Router { page, auto: false, headed: true, switches: vec![], unreported: vec![], last_snapshot: None, before_switch: None, lane_ref_start: 1 })
+    }
+
     pub fn lane(&self) -> Engine {
         self.page.engine()
     }
@@ -62,7 +68,13 @@ impl Router {
     }
 
     pub fn status(&self) -> String {
-        let mode = if self.auto { "auto" } else { "pinned by --engine" };
+        let mode = if self.page.is_attached() {
+            "attached to a running app"
+        } else if self.auto {
+            "auto"
+        } else {
+            "pinned by --engine"
+        };
         let mut s = format!("lane: {} ({mode})", self.lane());
         if self.switches.is_empty() {
             s.push_str("\nswitches: none");

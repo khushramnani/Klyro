@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'">
+<title>Klyro sample app</title>
+<h1>Sample app</h1>
+<p>Clicked <output id="count">0</output> times</p>
+<button id="inc">Add one</button>
+<script>
+  inc.addEventListener('click', () => { count.textContent = Number(count.textContent) + 1; });
+</script>
+</html>

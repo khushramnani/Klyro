@@ -1,5 +1,6 @@
 //! Klyro web adapter: drives browsers over the Chrome DevTools Protocol.
 
+mod attach;
 mod ax;
 mod cdp;
 mod chromium;

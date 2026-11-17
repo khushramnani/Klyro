@@ -283,3 +283,74 @@ fn token_budget() {
     eprintln!("| total | {b} | {a} |");
     assert!(a * 2 < b, "diffs should at least halve the tokens: {a} vs {b}");
 }
+
+/// The sample Electron app, started with a DevTools port; stopped on drop.
+struct ElectronApp(std::process::Child);
+
+impl Drop for ElectronApp {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Electron from the fixture's `npm install`, or None (the test then skips).
+fn electron_binary() -> Option<std::path::PathBuf> {
+    let pkg = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/electron-app/node_modules/electron");
+    let rel = std::fs::read_to_string(pkg.join("path.txt")).ok()?;
+    let bin = pkg.join("dist").join(rel.trim());
+    if bin.exists() {
+        Some(bin)
+    } else {
+        eprintln!("SKIP: run `npm install` in tests/fixtures/electron-app");
+        None
+    }
+}
+
+#[test]
+fn electron_connect_snapshot_click_screenshot() {
+    let Some(bin) = electron_binary() else { return };
+    let k = Klyro::new("electron");
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();
+
+    // Nothing listening yet: a clear error.
+    assert!(k.fails(&["connect", &port]).contains(&format!("nothing is listening on port {port}")));
+
+    let app_dir = bin.ancestors().nth(4).unwrap(); // .../electron-app/node_modules/electron/dist/<bin>
+    let child = std::process::Command::new(&bin)
+        .arg(".")
+        .arg(format!("--remote-debugging-port={port}"))
+        .current_dir(app_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let _app = ElectronApp(child);
+
+    let end = Instant::now() + Duration::from_secs(20);
+    let connected = loop {
+        let (ok, out, err) = k.run(&["--session", "a", "connect", &port]);
+        if ok || Instant::now() > end {
+            assert!(ok, "could not connect: {err}");
+            break out;
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    };
+    assert!(connected.contains("Klyro sample app"), "{connected}");
+
+    let snap = k.ok(&["--session", "a", "snapshot"]);
+    assert!(snap.contains("button \"Add one\""), "{snap}");
+    let out = k.ok(&["--session", "a", "click", &ref_of(&snap, "Add one")]);
+    assert!(out.contains("+ text: 1"), "click shows the counter change: {out}");
+
+    let shot = k.home.join("app.png");
+    k.ok(&["--session", "a", "screenshot", shot.to_str().unwrap()]);
+    let (w, h) = png_dims(&shot);
+    assert!(w > 100 && h > 100, "{w}x{h}");
+    assert!(k.ok(&["--session", "a", "status"]).contains("attached to a running app"));
+
+    // Closing the session detaches; the app keeps running.
+    k.ok(&["--session", "a", "close"]);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port.parse::<u16>().unwrap())).is_ok(), "app must still run");
+}

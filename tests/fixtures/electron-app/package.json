@@ -1,0 +1,9 @@
+{
+  "name": "klyro-sample-electron-app",
+  "private": true,
+  "description": "Tiny Electron app for Klyro's connect tests.",
+  "main": "main.js",
+  "devDependencies": {
+    "electron": "45.3.3"
+  }
+}

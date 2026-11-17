@@ -17,7 +17,8 @@ pub struct WebPage {
     pub(crate) refs: RefMap<Handle>,
     main_frame: String,
     // Declared last so the connection closes before the process is stopped.
-    _proc: Proc,
+    // None when attached to a program we did not start (an Electron app): never stop it.
+    _proc: Option<Proc>,
 }
 
 impl WebPage {
@@ -37,7 +38,17 @@ impl WebPage {
             cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": 1280, "height": 800, "deviceScaleFactor": 1, "mobile": false }))?;
         }
         let main_frame = cdp.call("Page.getFrameTree", json!({}))?["frameTree"]["frame"]["id"].as_str().unwrap_or("").to_string();
-        Ok(Self { engine, cdp, refs: RefMap::new(), main_frame, _proc: proc })
+        Ok(Self { engine, cdp, refs: RefMap::new(), main_frame, _proc: Some(proc) })
+    }
+
+    /// Wraps a CDP session already attached to someone else's page (see `attach`).
+    pub(crate) fn attached(cdp: Cdp, main_frame: String) -> Self {
+        Self { engine: Engine::Chromium, cdp, refs: RefMap::new(), main_frame, _proc: None }
+    }
+
+    /// True when this page belongs to a program Klyro attached to rather than started.
+    pub fn is_attached(&self) -> bool {
+        self._proc.is_none()
     }
 
     pub fn engine(&self) -> Engine {
@@ -273,7 +284,17 @@ impl Adapter for WebPage {
             params["clip"] = json!({ "x": 0, "y": 0, "width": w, "height": h, "scale": 1 });
             params["captureBeyondViewport"] = json!(true);
         }
-        let shot = self.cdp.call("Page.captureScreenshot", params)?;
+        let shot = if self.is_attached() {
+            // A hidden or minimized app window never paints, and the capture just waits.
+            self.cdp.call_timeout("Page.captureScreenshot", params, Duration::from_secs(5)).map_err(|e| match e {
+                Error::Engine(m) if m.ends_with("timed out") => {
+                    Error::Engine("the app's window is hidden or minimized; show it to take a screenshot".into())
+                }
+                e => e,
+            })?
+        } else {
+            self.cdp.call("Page.captureScreenshot", params)?
+        };
         base64_decode(shot["data"].as_str().unwrap_or("")).ok_or_else(|| engine_err("screenshot data was not base64"))
     }
 
@@ -296,9 +317,14 @@ impl Adapter for WebPage {
     }
 
     fn close(&mut self) -> Result<()> {
-        // The process is killed when the adapter is dropped; ask politely first.
-        self.cdp.session = None;
-        let _ = self.cdp.call("Browser.close", json!({}));
+        let session = self.cdp.session.take();
+        if self.is_attached() {
+            // Not ours: detach and leave the app running.
+            let _ = self.cdp.call("Target.detachFromTarget", json!({ "sessionId": session }));
+        } else {
+            // The process is killed when the adapter is dropped; ask politely first.
+            let _ = self.cdp.call("Browser.close", json!({}));
+        }
         Ok(())
     }
 }

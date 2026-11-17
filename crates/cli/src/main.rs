@@ -33,6 +33,9 @@ enum Cmd {
         #[arg(long, env = "KLYRO_ENGINE")]
         engine: Option<String>,
     },
+    /// Attach to a running app (Electron, or Chrome) started with --remote-debugging-port=PORT.
+    /// The app keeps running after `close`.
+    Connect { port: u16 },
     /// Print the page as a tree with refs, e.g. `- button "Login" [ref=e3]`.
     Snapshot {
         /// Interactive elements only, as a flat list.
@@ -137,12 +140,13 @@ fn main() -> ExitCode {
             };
             ("wait", vec![kind.into(), value, timeout.to_string()])
         }
+        Cmd::Connect { port } => ("connect", vec![port.to_string()]),
         Cmd::Status => ("status", vec![]),
         Cmd::Close => ("close", vec![]),
     };
     let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed, engine };
-    // Only `open` may start a daemon; other commands need an existing session anyway.
-    match send(req, cmd == "open") {
+    // Only `open`/`connect` may start a daemon; other commands need an existing session anyway.
+    match send(req, cmd == "open" || cmd == "connect") {
         Ok(Response { ok, out, notes }) => {
             for n in notes {
                 eprintln!("note: switched lane: {n}");
