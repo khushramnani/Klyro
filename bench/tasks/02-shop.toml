@@ -1,0 +1,12 @@
+kind = "shop (React SPA)"
+steps = [
+  "open https://www.saucedemo.com/",
+  "snapshot",
+  'fill textbox "Username" standard_user',
+  'fill textbox "Password" secret_sauce',
+  'click button "Login"',
+  "snapshot",
+  'click button "Add to cart"',
+  "text",
+  'expect "Remove"',
+]

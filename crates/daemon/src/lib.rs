@@ -253,9 +253,16 @@ fn act(req: &Request, sessions: &Sessions, ref_at: usize, action: Action, done: 
         };
         let d = diff(&before, &after);
         let (text, json) = if d.is_page_change() {
-            (format!("{head}
-page changed: {}
-{}", after.url, after.to_text()), json!({ "done": done, "target": target, "page_changed": true, "snapshot": after }))
+            // The new page's outline (refs, headings, messages): what the agent needs next.
+            // The full tree is one `snapshot` away, the text one `text` away.
+            let outline = after.outline();
+            let title = if after.title.is_empty() { String::new() } else { format!(" ({})", after.title) };
+            (
+                format!("{head}
+page changed: {}{title}
+{}", after.url, outline.to_text()),
+                json!({ "done": done, "target": target, "page_changed": true, "outline": outline }),
+            )
         } else if d.is_empty() {
             (format!("{head}
 no change yet (run `wait` or `snapshot` if the page updates later)"), json!({ "done": done, "target": target, "diff": d }))

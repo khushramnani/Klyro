@@ -1,0 +1,14 @@
+kind = "local demo app"
+needs = ["demo"]
+steps = [
+  "open {demo}/login",
+  "snapshot",
+  'fill textbox "Username" demo',
+  'fill textbox "Password" secret',
+  'click button "Log in"',
+  "snapshot",
+  'fill textbox "Note" "checked by an agent"',
+  "screenshot",
+  "text",
+  'expect "Note says: checked by an agent"',
+]

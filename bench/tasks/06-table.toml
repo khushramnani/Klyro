@@ -1,0 +1,6 @@
+kind = "data table (dashboard-like)"
+steps = [
+  "open https://the-internet.herokuapp.com/tables",
+  "text",
+  'expect "jdoe@hotmail.com"',
+]

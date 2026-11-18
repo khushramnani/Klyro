@@ -1,0 +1,11 @@
+kind = "JavaScript app (TodoMVC)"
+steps = [
+  "open https://demo.playwright.dev/todomvc/",
+  "snapshot",
+  'fill textbox "What needs to be done?" "buy milk"',
+  "press Enter",
+  'fill textbox "What needs to be done?" "write tests"',
+  "press Enter",
+  "text",
+  'expect "2 items left"',
+]

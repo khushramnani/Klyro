@@ -22,7 +22,8 @@ see pixels.
 4. Read the output of the action. It lists only what changed:
    - `+ text: Wrong password` (appeared), `- button "Sign in" [ref=e5]` (gone),
      `~ textbox "Email" [ref=e4] [value="me@example.com"]` (changed).
-   - `page changed: <url>` followed by the new page's tree, when a new page loaded.
+   - `page changed: <url> (title)` followed by the new page's outline (elements with refs,
+     headings, alert/status messages), when a new page loaded. `text` gives its content.
    - `no change yet`: the page may update later; use `klyro wait` or `klyro snapshot`.
 5. Repeat. Refs stay the same while their element stays on the page.
 

@@ -1,0 +1,8 @@
+kind = "docs site"
+steps = [
+  "open https://doc.rust-lang.org/book/",
+  "snapshot",
+  'click link "Hello, World!"',
+  "text",
+  'expect "Project Directory Setup"',
+]

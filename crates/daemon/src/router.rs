@@ -94,7 +94,14 @@ impl Router {
     }
 
     fn switch(&mut self, reason: &str) -> Result<()> {
-        let url = self.page.url().unwrap_or_default();
+        // A crashed fast lane can't tell its URL any more: fall back to the last one we saw.
+        let url = self
+            .page
+            .url()
+            .ok()
+            .filter(|u| !u.is_empty())
+            .or_else(|| self.last_snapshot.as_ref().map(|s| s.url.clone()))
+            .unwrap_or_default();
         let cookies = self.page.cookies().unwrap_or_default();
         let form = self.page.form_values().unwrap_or_default();
         let mut next = WebPage::launch(Engine::Chromium, self.headed)?;

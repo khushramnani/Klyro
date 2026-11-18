@@ -1,0 +1,6 @@
+kind = "PDF document"
+steps = [
+  "open {docs}/three-pages.pdf",
+  "text",
+  'expect "The second page says hello"',
+]

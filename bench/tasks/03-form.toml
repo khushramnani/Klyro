@@ -1,0 +1,10 @@
+kind = "form-heavy page"
+steps = [
+  "open https://www.selenium.dev/selenium/web/web-form.html",
+  "snapshot",
+  'fill textbox "Text input" "Klyro benchmark"',
+  'fill textbox "Textarea" "Several lines of text"',
+  'click button "Submit"',
+  "text",
+  'expect "Form submitted"',
+]

@@ -1,0 +1,6 @@
+kind = "Markdown document"
+steps = [
+  "open {docs}/notes.md",
+  "text",
+  'expect "Item two"',
+]

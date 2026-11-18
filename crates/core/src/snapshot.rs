@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
+/// Live messages an agent must not miss (errors, confirmations).
+const MESSAGE_ROLES: &[&str] = &["alert", "status", "alertdialog"];
+
 /// One element in a snapshot. Text runs are nodes with role "text".
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
@@ -54,6 +57,42 @@ impl Snapshot {
             .into_iter()
             .filter(|n| n.r#ref.is_some() && n.role != "heading")
             .collect();
+        Snapshot { url: self.url.clone(), title: self.title.clone(), nodes }
+    }
+
+    /// What an agent needs after landing on a new page: elements with refs (interactive ones
+    /// and headings) plus alert/status messages with their text, as a flat list.
+    pub fn outline(&self) -> Snapshot {
+        fn text_of(n: &Node) -> String {
+            let mut parts = vec![];
+            if !n.name.is_empty() {
+                parts.push(n.name.clone());
+            }
+            for c in &n.children {
+                let t = text_of(c);
+                if !t.is_empty() {
+                    parts.push(t);
+                }
+            }
+            parts.join(" ")
+        }
+        fn walk(nodes: &[Node], out: &mut Vec<Node>) {
+            for n in nodes {
+                if MESSAGE_ROLES.contains(&n.role.as_str()) {
+                    let text = text_of(n);
+                    if !text.is_empty() {
+                        out.push(Node { name: text, children: vec![], ..n.clone() });
+                    }
+                    continue;
+                }
+                if n.r#ref.is_some() {
+                    out.push(Node { children: vec![], ..n.clone() });
+                }
+                walk(&n.children, out);
+            }
+        }
+        let mut nodes = vec![];
+        walk(&self.nodes, &mut nodes);
         Snapshot { url: self.url.clone(), title: self.title.clone(), nodes }
     }
 
@@ -117,6 +156,22 @@ mod tests {
     #[test]
     fn interactive_is_flat_refs_without_headings() {
         assert_eq!(sample().interactive().to_text(), "- textbox \"Username\" [ref=e2] [value=\"tom\"]\n");
+    }
+
+    #[test]
+    fn outline_keeps_refs_headings_and_messages() {
+        let mut alert = Node::new("alert", "");
+        alert.children = vec![Node::new("text", "Wrong password")];
+        let mut s = sample();
+        s.nodes.push(alert);
+        s.nodes.push(Node::new("paragraph", "just text"));
+        assert_eq!(
+            s.outline().to_text(),
+            "- heading \"Login\" [ref=e1] [level=2]
+- textbox \"Username\" [ref=e2] [value=\"tom\"]
+- alert \"Wrong password\"
+"
+        );
     }
 
     #[test]

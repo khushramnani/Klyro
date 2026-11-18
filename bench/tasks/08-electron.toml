@@ -1,0 +1,9 @@
+kind = "Electron app"
+needs = ["electron"]
+steps = [
+  "connect {electron_port}",
+  "snapshot",
+  'click button "Add one"',
+  "text",
+  'expect "Clicked 1 times"',
+]
