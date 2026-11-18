@@ -60,6 +60,11 @@ impl Router {
         std::mem::take(&mut self.unreported)
     }
 
+    /// Live-view frame from the current lane (none on the fast lane: it has no pixels).
+    pub fn frame(&mut self) -> Option<Vec<u8>> {
+        self.page.frame()
+    }
+
     /// The last snapshot taken in this session, if any.
     pub fn last_snapshot(&self) -> Option<&Snapshot> {
         self.last_snapshot.as_ref()

@@ -556,3 +556,53 @@ fn windows_app_attach_by_title_leaves_it_running() {
     assert!(child.try_wait().unwrap().is_none(), "an attached app must keep running after close");
     let _ = child.kill();
 }
+
+/// GET on 127.0.0.1 -> (status line, body bytes).
+fn http_get(url: &str) -> (String, Vec<u8>) {
+    use std::io::{Read, Write};
+    let rest = url.strip_prefix("http://").unwrap();
+    let (host, path) = rest.split_once('/').unwrap();
+    let mut s = std::net::TcpStream::connect(host).unwrap();
+    write!(s, "GET /{path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").unwrap();
+    let mut buf = vec![];
+    s.read_to_end(&mut buf).unwrap();
+    let split = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&buf[..split]).to_string();
+    (head.lines().next().unwrap().to_string(), buf[split + 4..].to_vec())
+}
+
+#[test]
+fn live_view_logs_actions_masks_passwords_and_serves_frames() {
+    let app = demo_app();
+    let k = Klyro::with_engine("live", "chromium");
+    k.ok(&["open", &format!("{app}/login")]);
+
+    // `watch --once --json`: the page link and the log so far; also marks the session watched.
+    let w: serde_json::Value = serde_json::from_str(&k.ok(&["--json", "watch", "--once"])).unwrap();
+    let view = w["view"].as_str().unwrap().to_string();
+    assert!(w["events"].as_array().unwrap().iter().any(|e| e["cmd"] == "open"), "{w}");
+
+    let snap = k.ok(&["snapshot", "-i"]);
+    k.ok(&["fill", &ref_of(&snap, "Username"), "demo"]);
+    k.ok(&["fill", &ref_of(&snap, "Password"), "secret"]);
+
+    let (status, page) = http_get(&view);
+    assert!(status.contains("200") && String::from_utf8_lossy(&page).contains("<title>Klyro live</title>"));
+
+    let base = view.split("/live").next().unwrap();
+    let key = view.split("k=").nth(1).unwrap();
+    let (_, body) = http_get(&format!("{base}/events?k={key}&after=0"));
+    let ev: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let log = ev["events"].to_string();
+    assert!(log.contains("fill") && !log.contains("secret"), "a typed password must never reach the log: {log}");
+    assert!(ev["frames"]["default"].as_u64().is_some(), "a watched Chromium session has a frame: {ev}");
+
+    let (status, img) = http_get(&format!("{base}/frame?k={key}&session=default"));
+    assert!(status.contains("200") && img.starts_with(&[0xFF, 0xD8]), "JPEG frame");
+    let (status, _) = http_get(&format!("{base}/events?k=wrong"));
+    assert!(status.contains("403"), "{status}");
+
+    // The terminal view prints the same log.
+    let printed = k.ok(&["watch", "--once"]);
+    assert!(printed.contains("[default] fill") && printed.contains("*****"), "{printed}");
+}

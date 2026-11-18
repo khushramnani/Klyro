@@ -106,6 +106,15 @@ enum Cmd {
     Status,
     /// Close the session and its browser.
     Close,
+    /// Watch what agents do: prints each action here and opens a live page with the screen.
+    Watch {
+        /// Don't open the browser; just print the page's link.
+        #[arg(long)]
+        no_open: bool,
+        /// Print what happened so far and exit.
+        #[arg(long)]
+        once: bool,
+    },
     /// Check which engines this machine has, and the daemon.
     Doctor,
     /// Serve the same commands as MCP tools over stdio (for MCP clients).
@@ -129,6 +138,7 @@ fn main() -> ExitCode {
             };
         }
         Cmd::Doctor => return doctor::run(cli.json),
+        Cmd::Watch { no_open, once } => return watch(no_open, once, cli.json),
         Cmd::Mcp => {
             return match klyro_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock()) {
                 Ok(()) => ExitCode::SUCCESS,
@@ -205,4 +215,87 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Polls the daemon's live log and prints new actions until stopped (Ctrl+C).
+fn watch(no_open: bool, once: bool, json: bool) -> ExitCode {
+    let poll = |after: u64| -> Result<serde_json::Value, String> {
+        let req = Request {
+            token: String::new(),
+            session: String::new(),
+            cmd: "events".into(),
+            args: vec![after.to_string()],
+            json: true,
+            headed: false,
+            engine: None,
+        };
+        let resp = send(req, true)?;
+        serde_json::from_str(&resp.out).map_err(|e| format!("bad reply: {e}"))
+    };
+    let first = match poll(0) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let url = first["view"].as_str().unwrap_or("").to_string();
+    if json && once {
+        println!("{first}");
+        return ExitCode::SUCCESS;
+    }
+    eprintln!("live view: {url}");
+    if !no_open && !once {
+        open_in_browser(&url);
+    }
+    // Times are shown relative to the first action seen.
+    let mut start: Option<u64> = None;
+    let mut after = 0;
+    let mut data = first;
+    loop {
+        for e in data["events"].as_array().into_iter().flatten() {
+            after = e["seq"].as_u64().unwrap_or(after);
+            let t0 = *start.get_or_insert(e["at"].as_u64().unwrap_or(0));
+            print_event(e, t0);
+        }
+        if once {
+            return ExitCode::SUCCESS;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        data = match poll(after) {
+            Ok(v) => v,
+            Err(_) => {
+                eprintln!("daemon stopped");
+                return ExitCode::SUCCESS;
+            }
+        };
+    }
+}
+
+fn print_event(e: &serde_json::Value, start_ms: u64) {
+    let secs = e["at"].as_u64().unwrap_or(0).saturating_sub(start_ms) as f64 / 1000.0;
+    let status = if e["ok"] == true { "ok" } else { "FAILED" };
+    println!("+{secs:>6.1}s  [{}] {} {}  {status}", e["session"].as_str().unwrap_or(""), e["cmd"].as_str().unwrap_or(""), e["args"].as_str().unwrap_or(""));
+    let out = e["out"].as_str().unwrap_or("");
+    let lines: Vec<&str> = out.lines().collect();
+    for l in lines.iter().take(6) {
+        println!("          {l}");
+    }
+    if lines.len() > 6 {
+        println!("          … {} more lines", lines.len() - 6);
+    }
+    for n in e["notes"].as_array().into_iter().flatten() {
+        println!("          note: {}", n.as_str().unwrap_or(""));
+    }
+}
+
+fn open_in_browser(url: &str) {
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(opener).arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
 }

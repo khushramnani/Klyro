@@ -66,5 +66,6 @@ Options for any command: `--session <name>` (separate pages and cookies; default
 - Windows apps: `click` uses the control's own action (no mouse) when it can; `press` and
   screenshots bring the app's window to the front. `close` stops an app klyro started and
   leaves an attached one running.
-- `klyro open --headed <url>` shows a real browser window, only if a human wants to watch.
+- A human can follow along with `klyro watch` (a live page with the screen and your actions);
+  nothing changes for you. `klyro open --headed <url>` shows a real browser window instead.
 - Close sessions you no longer need: `klyro close` (and `--session <name>` for others).

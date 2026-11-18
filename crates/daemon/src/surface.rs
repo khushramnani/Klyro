@@ -28,6 +28,15 @@ impl Surface {
         }
     }
 
+    /// (image bytes, MIME type) for the live view, taken without side effects: no lane
+    /// switch, no stealing focus. None when there are no pixels to show.
+    pub fn frame(&mut self) -> Option<(Vec<u8>, &'static str)> {
+        match self {
+            Surface::Web(r) => r.frame().map(|b| (b, "image/jpeg")),
+            Surface::App(a) => a.frame().map(|b| (b, "image/png")),
+        }
+    }
+
     /// Lane switches since the last call (web only).
     pub fn take_notes(&mut self) -> Vec<String> {
         match self {

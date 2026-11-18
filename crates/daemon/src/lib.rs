@@ -2,6 +2,7 @@
 
 pub mod client;
 pub mod ipc;
+pub mod live;
 pub mod router;
 pub mod surface;
 
@@ -25,10 +26,24 @@ pub fn run() -> io::Result<()> {
     kill_children_with_me();
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let token = ipc::new_token();
-    ipc::write_info(&Info { port: listener.local_addr()?.port(), token: token.clone(), pid: std::process::id() })?;
+    let port = listener.local_addr()?.port();
+    ipc::write_info(&Info { port, token: token.clone(), pid: std::process::id() })?;
+    live::init(port);
     eprintln!("klyro daemon {} listening on {}", std::process::id(), listener.local_addr()?);
 
     let sessions: Sessions = Arc::default();
+    // Nothing open and nobody watching: stop. (Closing the last session stops it at once unless
+    // someone is watching; this catches the watcher leaving later.)
+    let idle = sessions.clone();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(5));
+            if idle.lock().unwrap().is_empty() && !live::watching() {
+                ipc::remove_info();
+                std::process::exit(0);
+            }
+        }
+    });
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let (sessions, token) = (sessions.clone(), token.clone());
@@ -103,7 +118,12 @@ fn kill_children_with_me() {}
 
 fn handle(stream: TcpStream, token: &str, sessions: &Sessions) -> io::Result<()> {
     let mut line = String::new();
-    BufReader::new(stream.try_clone()?).read_line(&mut line)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    reader.read_line(&mut line)?;
+    // A browser on the live view page (read-only, its own key).
+    if line.starts_with("GET ") {
+        return live::http(reader, &stream, &line);
+    }
     let (resp, exit) = match serde_json::from_str::<Request>(&line) {
         Ok(req) if req.token == token => dispatch(&req, sessions),
         Ok(_) => (err("bad token"), false),
@@ -150,6 +170,12 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
         "status" => with_session(req, sessions, |a| Ok(reply(req, a.status(), a.status_json()))),
         "screenshot" => screenshot(req, sessions),
         "wait" => wait(req, sessions),
+        // The live log, for `klyro watch` (not itself logged).
+        "events" => {
+            live::mark_watched();
+            let after = req.args.first().and_then(|a| a.parse().ok()).unwrap_or(0);
+            return (Response { ok: true, out: live::events_json(after).to_string(), notes: vec![] }, false);
+        }
         "close" => {
             let mut map = sessions.lock().unwrap();
             let r = match map.remove(&req.session) {
@@ -159,15 +185,26 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
                 }
                 None => Err(no_session(&req.session)),
             };
-            let exit = map.is_empty();
-            return (to_response(r), exit);
+            // Someone watching keeps the daemon (and their view) up; the idle check ends it later.
+            let exit = map.is_empty() && !live::watching();
+            let resp = to_response(r);
+            live::record(req, &resp);
+            live::forget(&req.session);
+            return (resp, exit);
         }
         other => Err(format!("unknown command {other}")),
     };
     let mut resp = to_response(result);
+    let session = sessions.lock().unwrap().get(&req.session).cloned();
     // Lane switches caused by this command, shown to the caller.
-    if let Some(s) = sessions.lock().unwrap().get(&req.session).cloned() {
+    if let Some(s) = &session {
         resp.notes = s.lock().unwrap().take_notes();
+    }
+    let seq = live::record(req, &resp);
+    // A fresh frame for the live view, only while someone watches (agents pay nothing otherwise).
+    if let Some(s) = session.filter(|_| resp.ok && live::watching() && live::changes_view(&req.cmd)) {
+        let frame = s.lock().unwrap().frame();
+        live::set_frame(&req.session, frame, seq);
     }
     (resp, false)
 }

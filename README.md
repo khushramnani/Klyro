@@ -21,6 +21,15 @@ lane and every switch with its reason.
 Pin one lane for a session, which turns automatic switching off:
 `klyro open --engine chromium <url>` (or `KLYRO_ENGINE`).
 
+## Watch an agent
+
+`klyro watch` prints every action as it happens and opens a local page with the session's
+screen and the action log. It is read-only (its own key; it can't send commands), shows
+typed passwords as `*****`, and only captures frames while someone is watching. On the fast
+lane, which has no pixels, the page shows the session's last text output instead.
+`klyro watch --no-open` prints the link without opening a browser; `--once` prints what has
+happened so far and exits.
+
 ## Desktop apps (Windows)
 
 `klyro app "Calculator"` attaches to an open window by title; `klyro app --launch <program> -- [args]`

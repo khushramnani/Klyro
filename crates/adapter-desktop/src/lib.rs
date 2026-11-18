@@ -35,6 +35,9 @@ mod other {
         pub fn last_snapshot(&self) -> Option<&Snapshot> {
             None
         }
+        pub fn frame(&self) -> Option<Vec<u8>> {
+            None
+        }
     }
 
     impl Adapter for DesktopApp {

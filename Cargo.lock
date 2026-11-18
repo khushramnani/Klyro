@@ -420,6 +420,7 @@ name = "klyro-adapter-desktop"
 version = "0.1.0"
 dependencies = [
  "klyro-core",
+ "png",
  "uiautomation",
  "windows",
 ]

@@ -47,6 +47,19 @@ impl WebPage {
         Self { engine: Engine::Chromium, cdp, refs: RefMap::new(), main_frame, _proc: None }
     }
 
+    /// A JPEG of the viewport for the live view; None on engines without pixels. Never
+    /// changes lanes and never waits long.
+    pub fn frame(&mut self) -> Option<Vec<u8>> {
+        if !self.engine.has_layout() {
+            return None;
+        }
+        let shot = self
+            .cdp
+            .call_timeout("Page.captureScreenshot", json!({ "format": "jpeg", "quality": 70 }), Duration::from_secs(3))
+            .ok()?;
+        base64_decode(shot["data"].as_str()?)
+    }
+
     /// True when this page belongs to a program Klyro attached to rather than started.
     pub fn is_attached(&self) -> bool {
         self._proc.is_none()

@@ -162,6 +162,11 @@ impl DesktopApp {
     pub fn last_snapshot(&self) -> Option<&Snapshot> {
         self.last.as_ref()
     }
+
+    /// A PNG for the live view, taken without bringing the app to the front.
+    pub fn frame(&self) -> Option<Vec<u8>> {
+        self.on_worker(|s| Ok(print_window(&s.window))).ok().flatten()
+    }
 }
 
 /// Top-level windows on the desktop.
@@ -212,9 +217,10 @@ fn role(ct: ControlType) -> Option<(&'static str, bool)> {
         Window => ("window", false),
         Calendar => ("calendar", false),
         // Containers with nothing to say: their children move up.
-        Pane | Custom | TitleBar => return None,
-        // Noise for an agent.
-        ScrollBar | Thumb | Separator => ("", false),
+        Pane | Custom => return None,
+        // Noise for an agent. The title bar (system menu, minimize/maximize/close) also gets new
+        // runtime ids on every look in some toolkits, which would show up as changes in diffs.
+        ScrollBar | Thumb | Separator | TitleBar => ("", false),
         _ => return None,
     })
 }
@@ -354,7 +360,8 @@ impl State {
             Some(r) => self.element(r)?,
             None => self.window.clone(),
         };
-        // The capture reads the screen, so the window must be in front.
+        // Exact pixels: read the screen, which needs the window in front. (PrintWindow avoids
+        // that, but DPI-unaware apps draw at 100% into it, so crops would be off.)
         self.focus_window();
         std::thread::sleep(Duration::from_millis(150));
         let shot = match (&opts.target, visible_frame(&self.window)) {
@@ -369,6 +376,70 @@ impl State {
         let _ = std::fs::remove_file(&path);
         png
     }
+}
+
+/// PNG of the window as it draws itself, even behind other windows; for the live view, where
+/// stealing focus every step would be worse than slightly soft pixels. DPI-unaware apps draw at
+/// 100% into the bitmap, so the black margin that leaves is trimmed. None if the app can't do it.
+fn print_window(window: &UIElement) -> Option<Vec<u8>> {
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Graphics::Gdi::*;
+    use windows::Win32::Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    const PW_RENDERFULLCONTENT: u32 = 2;
+
+    let hwnd: HWND = window.get_native_window_handle().ok()?.into();
+    let mut win = RECT::default();
+    // SAFETY: plain GDI calls on a live window handle; every object made here is released below.
+    let (buf, w, h) = unsafe {
+        GetWindowRect(hwnd, &mut win).ok()?;
+        let (w, h) = (win.right - win.left, win.bottom - win.top);
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let screen = GetWindowDC(Some(hwnd));
+        let mem = CreateCompatibleDC(Some(screen));
+        let bmp = CreateCompatibleBitmap(screen, w, h);
+        let old = SelectObject(mem, bmp.into());
+        let printed = PrintWindow(hwnd, mem, PRINT_WINDOW_FLAGS(PW_RENDERFULLCONTENT)).as_bool();
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w,
+                biHeight: -h, // top-down rows
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+        let rows = GetDIBits(mem, bmp, 0, h as u32, Some(buf.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS);
+        SelectObject(mem, old);
+        let _ = DeleteObject(bmp.into());
+        let _ = DeleteDC(mem);
+        ReleaseDC(Some(hwnd), screen);
+        if !printed || rows != h {
+            return None;
+        }
+        (buf, w as usize, h as usize)
+    };
+    let black = |x: usize, y: usize| buf[(y * w + x) * 4..][..3] == [0, 0, 0];
+    let cw = (1..=w).rev().find(|&x| (0..h).any(|y| !black(x - 1, y)))?;
+    let ch = (1..=h).rev().find(|&y| (0..cw).any(|x| !black(x, y - 1)))?;
+    let mut rgba = Vec::with_capacity(cw * ch * 4);
+    for y in 0..ch {
+        for px in buf[y * w * 4..][..cw * 4].as_chunks::<4>().0 {
+            rgba.extend_from_slice(&[px[2], px[1], px[0], 255]); // BGRA -> opaque RGBA
+        }
+    }
+    let mut png = vec![];
+    let mut enc = png::Encoder::new(&mut png, cw as u32, ch as u32);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header().ok()?.write_image_data(&rgba).ok()?;
+    Some(png)
 }
 
 /// The window's visible frame. Windows 10/11 report bounds that include an invisible ~7 px
