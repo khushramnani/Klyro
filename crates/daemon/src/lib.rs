@@ -3,10 +3,12 @@
 pub mod client;
 pub mod ipc;
 pub mod router;
+pub mod surface;
 
 use ipc::{Info, Request, Response};
 use klyro_adapter_web::Engine;
 use router::Router;
+use surface::Surface;
 use klyro_core::{Action, Adapter, ScreenshotOptions, Wait, diff};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -15,7 +17,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
-type Session = Arc<Mutex<Router>>;
+type Session = Arc<Mutex<Surface>>;
 type Sessions = Arc<Mutex<HashMap<String, Session>>>;
 
 /// Runs until the last session closes.
@@ -127,6 +129,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
     let result = match req.cmd.as_str() {
         "open" => open(req, sessions),
         "connect" => connect(req, sessions),
+        "app" => app(req, sessions),
         "snapshot" => with_session(req, sessions, |a| {
             let mut s = a.snapshot()?;
             if req.args.iter().any(|x| x == "interactive") {
@@ -193,7 +196,7 @@ fn open(req: &Request, sessions: &Sessions) -> Result<String, String> {
                 created = true;
                 // ponytail: launches while holding the map lock (about a second); per-session init if that hurts.
                 let is_doc = std::path::Path::new(&url).is_file();
-                let s: Session = Arc::new(Mutex::new(Router::start(engine, req.headed, is_doc).map_err(|e| e.to_string())?));
+                let s: Session = Arc::new(Mutex::new(Surface::Web(Router::start(engine, req.headed, is_doc).map_err(|e| e.to_string())?)));
                 map.insert(req.session.clone(), s.clone());
                 s
             }
@@ -215,11 +218,29 @@ fn connect(req: &Request, sessions: &Sessions) -> Result<String, String> {
     if map.contains_key(&req.session) {
         return Err(format!("session '{}' already exists: close it or pick another with --session", req.session));
     }
-    let mut router = Router::attach(port).map_err(|e| e.to_string())?;
+    let mut router = Surface::Web(Router::attach(port).map_err(|e| e.to_string())?);
     let snap = router.snapshot().map_err(|e| e.to_string())?;
     map.insert(req.session.clone(), Arc::new(Mutex::new(router)));
     let title = if snap.title.is_empty() { snap.url.clone() } else { snap.title.clone() };
     Ok(reply(req, format!("connected to port {port}: {title}"), json!({ "connected": port, "url": snap.url, "title": snap.title })))
+}
+
+/// A native desktop app: args ["attach", title] or ["launch", program, args...].
+fn app(req: &Request, sessions: &Sessions) -> Result<String, String> {
+    let mut map = sessions.lock().unwrap();
+    if map.contains_key(&req.session) {
+        return Err(format!("session '{}' already exists: close it or pick another with --session", req.session));
+    }
+    let desktop = match req.args.split_first() {
+        Some((mode, rest)) if mode == "attach" && !rest.is_empty() => klyro_adapter_desktop::DesktopApp::attach(&rest.join(" ")),
+        Some((mode, rest)) if mode == "launch" && !rest.is_empty() => klyro_adapter_desktop::DesktopApp::launch(rest),
+        _ => return Err("app needs a window title, or --launch <program> [args]".into()),
+    };
+    let mut surface = Surface::App(desktop.map_err(|e| e.to_string())?);
+    let snap = surface.snapshot().map_err(|e| e.to_string())?;
+    let status = surface.status();
+    map.insert(req.session.clone(), Arc::new(Mutex::new(surface)));
+    Ok(reply(req, format!("{status}\n{}", snap.outline().to_text().trim_end()), json!({ "app": snap.title, "outline": snap.outline() })))
 }
 
 /// Text or JSON, as the caller asked.
@@ -327,7 +348,7 @@ fn wait(req: &Request, sessions: &Sessions) -> Result<String, String> {
 fn with_session<T>(
     req: &Request,
     sessions: &Sessions,
-    f: impl FnOnce(&mut Router) -> klyro_core::Result<T>,
+    f: impl FnOnce(&mut Surface) -> klyro_core::Result<T>,
 ) -> Result<T, String> {
     let s = sessions.lock().unwrap().get(&req.session).cloned().ok_or_else(|| no_session(&req.session))?;
     let mut a = s.lock().unwrap();

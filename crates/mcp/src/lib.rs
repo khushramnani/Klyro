@@ -87,7 +87,7 @@ mod tests {
         let r = call("tools/list", json!({}));
         let tools = r["result"]["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-        for n in ["open", "connect", "snapshot", "click", "fill", "press", "text", "wait", "screenshot", "status", "close"] {
+        for n in ["open", "connect", "app", "snapshot", "click", "fill", "press", "text", "wait", "screenshot", "status", "close"] {
             assert!(names.contains(&n), "missing tool {n}");
         }
         assert!(tools.iter().all(|t| t["inputSchema"]["type"] == "object" && t["description"].is_string()));

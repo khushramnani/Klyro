@@ -16,3 +16,4 @@ klyro-core = { path = "crates/core" }
 klyro-adapter-web = { path = "crates/adapter-web" }
 klyro-daemon = { path = "crates/daemon" }
 klyro-mcp = { path = "crates/mcp" }
+klyro-adapter-desktop = { path = "crates/adapter-desktop" }

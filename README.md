@@ -21,6 +21,12 @@ lane and every switch with its reason.
 Pin one lane for a session, which turns automatic switching off:
 `klyro open --engine chromium <url>` (or `KLYRO_ENGINE`).
 
+## Desktop apps (Windows)
+
+`klyro app "Calculator"` attaches to an open window by title; `klyro app --launch <program> -- [args]`
+starts one. The same commands then work on its controls through Windows UI Automation.
+macOS and Linux apps are not supported yet.
+
 ## Documents
 
 `klyro open report.pdf` (or `.md`, `.html`) shows a local file on the visual lane. `text`

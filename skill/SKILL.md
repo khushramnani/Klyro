@@ -1,6 +1,6 @@
 ---
 name: klyro
-description: See and use websites, Electron apps and local documents (PDF, Markdown, HTML) from the command line with `klyro`. Use when a task needs a web page, a web app, a running Electron app or a document checked, read, filled in, clicked through or screenshotted.
+description: See and use websites, Electron apps, native Windows apps and local documents (PDF, Markdown, HTML) from the command line with `klyro`. Use when a task needs a web page, a web app, a desktop app or a document checked, read, filled in, clicked through or screenshotted.
 ---
 
 # Klyro
@@ -40,6 +40,7 @@ see pixels.
 | `wait <ms>` / `wait --text <t>` / `wait --url <part>` | Wait (default timeout 10 s, `--timeout <ms>`) |
 | `screenshot [file.png] [--full] [--ref <ref>] [--page <n>]` | Save a PNG; prints path and size |
 | `connect <port>` | Attach to a running Electron app started with `--remote-debugging-port=<port>` |
+| `app "<window title>"` / `app --launch <program> -- [args]` | Drive a native Windows app (attach to an open window, or start one) |
 | `status` | Which engine the session uses, and any switches |
 | `close` | Close the session (an attached app keeps running) |
 | `doctor` | What this machine supports |
@@ -62,5 +63,8 @@ Options for any command: `--session <name>` (separate pages and cookies; default
   and typed form values come along, other in-page state (open menus, scroll position, data
   a script kept in memory) does not. If that matters, start with `klyro open --engine chromium <url>`.
 - Refs can be written `e5` or `@e5`. Password fields show a masked value.
+- Windows apps: `click` uses the control's own action (no mouse) when it can; `press` and
+  screenshots bring the app's window to the front. `close` stops an app klyro started and
+  leaves an attached one running.
 - `klyro open --headed <url>` shows a real browser window, only if a human wants to watch.
 - Close sessions you no longer need: `klyro close` (and `--session <name>` for others).

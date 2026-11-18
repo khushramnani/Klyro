@@ -22,6 +22,11 @@ pub fn list() -> Vec<Value> {
         tool("connect", "Attach to a running Electron app started with --remote-debugging-port=<port>.", json!({
             "port": { "type": "integer" },
         }), &["port"]),
+        tool("app", "Drive a native Windows app: attach to an open window by `title`, or start `launch` (a program, with `args`).", json!({
+            "title": { "type": "string", "description": "Part of an open window's title" },
+            "launch": { "type": "string", "description": "Program to start instead (close stops it)" },
+            "args": { "type": "array", "items": { "type": "string" } },
+        }), &[]),
         tool("snapshot", "The page as a tree with refs, e.g. `- button \"Login\" [ref=e3]`.", json!({
             "interactive": { "type": "boolean", "description": "Interactive elements only, flat (smaller)" },
         }), &[]),
@@ -74,6 +79,16 @@ fn run(name: &str, a: &Value) -> Result<Vec<Value>, String> {
             req.args = vec![url];
         }
         "connect" => req.args = vec![a["port"].as_u64().ok_or("connect needs `port`")?.to_string()],
+        "app" => {
+            req.args = match (s("launch"), s("title")) {
+                (Some(p), _) => {
+                    let extra = a["args"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from));
+                    ["launch".to_string(), p].into_iter().chain(extra).collect()
+                }
+                (None, Some(t)) => vec!["attach".into(), t],
+                _ => return Err("app needs `title` or `launch`".into()),
+            }
+        }
         "snapshot" if a["interactive"].as_bool() == Some(true) => req.args = vec!["interactive".into()],
         "click" => req.args = vec![need("ref")?],
         "fill" => req.args = vec![need("ref")?, need("text")?],
@@ -113,7 +128,7 @@ fn run(name: &str, a: &Value) -> Result<Vec<Value>, String> {
         other => return Err(format!("unknown tool {other}")),
     }
 
-    let resp = send(req, name == "open" || name == "connect")?;
+    let resp = send(req, matches!(name, "open" | "connect" | "app"))?;
     let mut text = resp.out;
     for n in &resp.notes {
         text.push_str(&format!("\nnote: switched lane: {n}"));

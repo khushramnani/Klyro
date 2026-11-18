@@ -8,5 +8,6 @@ license.workspace = true
 [dependencies]
 klyro-core.workspace = true
 klyro-adapter-web.workspace = true
+klyro-adapter-desktop.workspace = true
 serde.workspace = true
 serde_json.workspace = true

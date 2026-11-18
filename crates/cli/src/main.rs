@@ -36,6 +36,18 @@ enum Cmd {
     /// Attach to a running app (Electron, or Chrome) started with --remote-debugging-port=PORT.
     /// The app keeps running after `close`.
     Connect { port: u16 },
+    /// Drive a native Windows app: attach to an open window by title, or --launch a program.
+    /// Then snapshot, click, fill, press, text, wait and screenshot work as on web pages.
+    App {
+        /// A window title (or part of it), or with --launch the program to start.
+        target: String,
+        /// Start TARGET (a program) instead of attaching to a window; `close` stops it.
+        #[arg(long)]
+        launch: bool,
+        /// Arguments for the launched program (after `--`).
+        #[arg(last = true)]
+        args: Vec<String>,
+    },
     /// Print the page as a tree with refs, e.g. `- button "Login" [ref=e3]`.
     Snapshot {
         /// Interactive elements only, as a flat list.
@@ -166,12 +178,16 @@ fn main() -> ExitCode {
             ("wait", vec![kind.into(), value, timeout.to_string()])
         }
         Cmd::Connect { port } => ("connect", vec![port.to_string()]),
+        Cmd::App { target, launch, args } => {
+            let mode = if launch { "launch" } else { "attach" };
+            ("app", [vec![mode.to_string(), target], args].concat())
+        }
         Cmd::Status => ("status", vec![]),
         Cmd::Close => ("close", vec![]),
     };
     let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed, engine };
     // Only `open`/`connect` may start a daemon; other commands need an existing session anyway.
-    match send(req, cmd == "open" || cmd == "connect") {
+    match send(req, matches!(cmd, "open" | "connect" | "app")) {
         Ok(Response { ok, out, notes }) => {
             for n in notes {
                 eprintln!("note: switched lane: {n}");

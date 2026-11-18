@@ -489,3 +489,70 @@ fn mcp_client_lists_tools_and_completes_demo_flow() {
     let (out, err, _) = m.tool("close", serde_json::json!({}));
     assert!(!err && out.contains("closed session default"), "{out}");
 }
+
+#[cfg(windows)]
+fn winforms_fixture() -> String {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/winforms-app/app.ps1").display().to_string()
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_app_launch_snapshot_act_screenshot_close() {
+    let k = Klyro::new("winapp");
+    let script = winforms_fixture();
+    let out = k.ok(&["app", "--launch", "powershell", "--", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", &script]);
+    assert!(out.contains("app: Klyro WinForms sample (started by klyro"), "{out}");
+
+    let snap = k.ok(&["snapshot"]);
+    assert!(snap.contains("- text: Nobody greeted yet"), "{snap}");
+    let (name, loud, greet) = (ref_of(&snap, "textbox \"Your name\""), ref_of(&snap, "checkbox \"Loud\""), ref_of(&snap, "button \"Greet\""));
+
+    let out = k.ok(&["fill", &name, "Ada"]);
+    assert!(out.contains(&format!("~ textbox \"Your name\" [ref={name}] [value=\"Ada\"]")), "{out}");
+    assert!(k.ok(&["click", &loud]).contains("[value=\"checked\"]"));
+    let out = k.ok(&["click", &greet]);
+    assert!(out.contains("+ text: HELLO, ADA!") && out.contains("- text: Nobody greeted yet"), "{out}");
+
+    k.ok(&["press", "End", &name]);
+    assert!(k.ok(&["press", "Backspace", &name]).contains("[value=\"Ad\"]"));
+    assert!(k.ok(&["text"]).contains("HELLO, ADA!"));
+    assert!(k.fails(&["fill", &greet, "x"]).contains("is not a text field"));
+    assert!(k.fails(&["wait", "--url", "x"]).contains("for web pages"));
+
+    let shot = k.home.join("app.png");
+    k.ok(&["screenshot", shot.to_str().unwrap()]);
+    let (w, h) = png_dims(&shot);
+    assert!(w >= 400 && h >= 200, "whole window: {w}x{h}");
+    k.ok(&["screenshot", "--ref", &greet, shot.to_str().unwrap()]);
+    let (bw, bh) = png_dims(&shot);
+    assert!(bw < w / 2 && bh < h / 2 && bw > 20, "button crop: {bw}x{bh}");
+
+    assert!(k.ok(&["status"]).contains("started by klyro"));
+    k.ok(&["close"]);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_app_attach_by_title_leaves_it_running() {
+    let k = Klyro::new("winattach");
+    assert!(k.fails(&["app", "No window has this title 9f3c"]).contains("no open window has"));
+    let mut child = Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", &winforms_fixture()])
+        .spawn()
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(20);
+    let out = loop {
+        let (ok, out, err) = k.run(&["--session", "a", "app", "klyro winforms"]);
+        if ok || Instant::now() > end {
+            assert!(ok, "{err}");
+            break out;
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    };
+    assert!(out.contains("attached; close leaves it running"), "{out}");
+    assert!(k.ok(&["--session", "a", "snapshot", "-i"]).contains("button \"Greet\""));
+    k.ok(&["--session", "a", "close"]);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(child.try_wait().unwrap().is_none(), "an attached app must keep running after close");
+    let _ = child.kill();
+}
