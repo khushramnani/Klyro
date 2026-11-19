@@ -19,6 +19,10 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
+/// Requests being handled. The idle check must not exit under one (e.g. a `close` that just
+/// emptied the session map but has not answered yet).
+static BUSY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 type Session = Arc<Mutex<Surface>>;
 type Sessions = Arc<Mutex<HashMap<String, Session>>>;
 
@@ -39,7 +43,7 @@ pub fn run() -> io::Result<()> {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(Duration::from_secs(5));
-            if idle.lock().unwrap().is_empty() && !live::watching() {
+            if idle.lock().unwrap().is_empty() && !live::watching() && BUSY.load(std::sync::atomic::Ordering::SeqCst) == 0 {
                 ipc::remove_info();
                 std::process::exit(0);
             }
@@ -48,11 +52,13 @@ pub fn run() -> io::Result<()> {
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
         let (sessions, token) = (sessions.clone(), token.clone());
+        BUSY.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         // ponytail: thread per connection; connections are short and few.
         std::thread::spawn(move || {
             if let Err(e) = handle(stream, &token, &sessions) {
                 eprintln!("connection error: {e}");
             }
+            BUSY.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         });
     }
     Ok(())
@@ -130,12 +136,21 @@ fn handle(stream: TcpStream, token: &str, sessions: &Sessions) -> io::Result<()>
         Ok(_) => (err("bad token"), false),
         Err(e) => (err(format!("bad request: {e}")), false),
     };
+    // Unlist ourselves before answering, so the caller's next command starts a new daemon
+    // instead of reaching this one while it exits.
+    if exit {
+        ipc::remove_info();
+    }
     let mut stream = stream;
     writeln!(stream, "{}", serde_json::to_string(&resp)?)?;
     stream.flush()?;
     if exit {
-        // ponytail: exits when the last session closes; a concurrent `open` racing this just restarts the daemon.
-        ipc::remove_info();
+        // Exiting with the socket open can reset it and lose the reply (Windows), so wait until
+        // the caller has read it and hung up.
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = io::Read::read(&mut stream, &mut [0u8; 1]);
+        // ponytail: a command already connected in this instant still fails; a client retry would close that.
         std::process::exit(0);
     }
     Ok(())
@@ -178,6 +193,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
         "screenshot" => screenshot(req, sessions),
         "wait" => wait(req, sessions),
         "replay" => replay_steps(req, sessions),
+        "expect" => expect(req, sessions),
         // The live log, for `klyro watch` (not itself logged).
         "events" => {
             live::mark_watched();
@@ -288,6 +304,42 @@ fn app(req: &Request, sessions: &Sessions) -> Result<String, String> {
     let status = surface.status();
     map.insert(req.session.clone(), Arc::new(Mutex::new(surface)));
     Ok(reply(req, format!("{status}\n{}", snap.outline().to_text().trim_end()), json!({ "app": snap.title, "outline": snap.outline() })))
+}
+
+/// A test assertion: args [text|url|role, is|not, timeout_ms, value, name?]. Looks again until
+/// it holds or the timeout passes, then fails with what it saw.
+fn expect(req: &Request, sessions: &Sessions) -> Result<String, String> {
+    let [kind, mode, timeout, value, rest @ ..] = req.args.as_slice() else {
+        return Err("expect needs --text, --url or --role".into());
+    };
+    let want = mode != "not";
+    let timeout: u64 = timeout.parse().map_err(|_| format!("bad timeout {timeout}"))?;
+    let name = rest.first().map(String::as_str);
+    let what = match (kind.as_str(), name) {
+        ("text", _) => format!("text {value:?}"),
+        ("url", _) => format!("a URL containing {value:?}"),
+        ("role", Some(n)) => format!("{value} {n:?}"),
+        ("role", None) => format!("any {value}"),
+        _ => return Err(format!("bad expect kind {kind}")),
+    };
+    let end = std::time::Instant::now() + Duration::from_millis(timeout);
+    loop {
+        let (holds, url) = with_session(req, sessions, |a| match kind.as_str() {
+            "text" => Ok((a.text()?.contains(value.as_str()), None)),
+            "url" => a.snapshot().map(|s| (s.url.contains(value.as_str()), Some(s.url))),
+            _ => a.snapshot().map(|s| (s.has(value, name), None)),
+        })?;
+        if holds == want {
+            let text = if want { format!("ok: page has {what}") } else { format!("ok: page has no {what}") };
+            return Ok(reply(req, text, json!({ "passed": true })));
+        }
+        if std::time::Instant::now() >= end {
+            let seen = url.map(|u| format!(" (URL is {u})")).unwrap_or_default();
+            let (expected, found) = if want { ("", "not found") } else { ("no ", "still there") };
+            return Err(format!("expected page to have {expected}{what}: {found} after {timeout} ms{seen}"));
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
 }
 
 /// args: [the recording's JSON, already read by the caller]. Runs in this session.

@@ -641,3 +641,41 @@ fn record_then_replay() {
     let err = k.fails(&["replay", file]);
     assert!(err.contains("2/2 click button \"Gone\"  FAILED: no button \"Gone\" on the page"), "{err}");
 }
+
+/// Task 15: assertions, recorded into a replay, and a suite of replays with a summary.
+#[test]
+fn expect_and_replay_suite() {
+    let app = demo_app();
+    let k = Klyro::with_engine("expect", "chromium");
+    k.ok(&["open", &format!("{app}/login")]);
+    assert_eq!(k.ok(&["expect", "--text", "Sign in"]).trim(), "ok: page has text \"Sign in\"");
+    k.ok(&["expect", "--not", "--text", "Wrong username"]);
+    k.ok(&["expect", "--role", "button", "--name", "Log in"]);
+    k.ok(&["expect", "--role", "textbox"]);
+    let err = k.fails(&["expect", "--text", "Nope", "--timeout", "300"]);
+    assert!(err.contains("expected page to have text \"Nope\": not found after 300 ms"), "{err}");
+    let err = k.fails(&["expect", "--url", "/dashboard", "--timeout", "300"]);
+    assert!(err.contains("(URL is ") && err.contains("/login"), "{err}");
+    k.fails(&["expect", "--not", "--role", "button", "--name", "Log in", "--timeout", "300"]);
+
+    // Record a passing test; write a failing one by hand.
+    let good = k.home.join("good.json");
+    let bad = k.home.join("bad.json");
+    k.ok(&["record", "start"]);
+    let snap = k.ok(&["snapshot"]);
+    k.ok(&["fill", &ref_of(&snap, "Username"), "demo"]);
+    k.ok(&["fill", &ref_of(&snap, "Password"), "secret"]);
+    k.ok(&["press", "Enter", &ref_of(&snap, "Password")]);
+    k.ok(&["expect", "--url", "/dashboard"]);
+    k.ok(&["close"]);
+    k.ok(&["record", "stop", good.to_str().unwrap()]);
+    let login = format!("{app}/login");
+    std::fs::write(&bad, format!(r#"[{{"cmd":"open","args":["{login}"]}},{{"cmd":"expect","args":["text","is","300","Nope"]}}]"#)).unwrap();
+
+    // The good one starts on a fresh session: it must open the page itself (recorded open came before start).
+    std::fs::write(&good, std::fs::read_to_string(&good).unwrap().replacen('[', &format!(r#"[{{"cmd":"open","args":["{login}"]}},"#), 1)).unwrap();
+    let (ok, out, _) = k.run(&["replay", bad.to_str().unwrap(), good.to_str().unwrap()]);
+    assert!(!ok, "a failed file fails the run: {out}");
+    assert!(out.contains("FAILED  ") && out.contains("text \"Nope\": not found"), "{out}");
+    assert!(out.contains("ok      ") && out.trim_end().ends_with("1 passed, 1 failed"), "{out}");
+}

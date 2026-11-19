@@ -46,6 +46,11 @@ ref, so replay finds them again on a fresh page (waiting up to 10 s for each to 
 stops at the first step that fails, naming it. Typed text is saved as typed: replace a
 password with `${NAME}` and replay fills it from that environment variable.
 
+To make a recording a test, add assertions while recording. `klyro expect --text "Welcome"`,
+`--url /dashboard` or `--role button --name "Log out"` (add `--not` for the opposite) fails
+with exit code 1 unless the check holds within 5 s. `klyro replay *.json` runs a suite: one
+line per file, a summary, and exit code 1 if any failed.
+
 ## Desktop apps (Windows)
 
 `klyro app "Calculator"` attaches to an open window by title; `klyro app --launch <program> -- [args]`

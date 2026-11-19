@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Commands worth replaying. Reads (snapshot, text, status) change nothing.
-const RECORDED: &[&str] = &["open", "connect", "app", "click", "fill", "press", "wait", "close"];
+/// Commands worth replaying: changes, waits and test assertions. Reads (snapshot, text,
+/// status) change nothing.
+const RECORDED: &[&str] = &["open", "connect", "app", "click", "fill", "press", "wait", "expect", "close"];
 
 /// Appends to recording files take turns.
 static WRITE: Mutex<()> = Mutex::new(());
@@ -117,6 +118,14 @@ pub fn push(req: &Request, resp: &Response, target: Option<Target>) -> Option<St
 impl Step {
     /// One line, like the command an agent would type: `click button "Log in"`.
     pub fn describe(&self) -> String {
+        // args: [kind, is|not, timeout, value, name?] -> `expect --not --role button --name "X"`
+        if let [kind, mode, _, value, rest @ ..] = self.args.as_slice()
+            && self.cmd == "expect"
+        {
+            let not = if mode == "not" { " --not" } else { "" };
+            let name = rest.first().map(|n| format!(" --name {n:?}")).unwrap_or_default();
+            return format!("expect{not} --{kind} {value:?}{name}");
+        }
         let mut parts = vec![self.cmd.clone()];
         if let Some(t) = &self.target {
             let nth = if t.nth > 0 { format!(" #{}", t.nth + 1) } else { String::new() };
@@ -212,6 +221,8 @@ mod tests {
         let steps: Vec<Step> = serde_json::from_slice(&std::fs::read(&out).unwrap()).unwrap();
         assert_eq!(steps.iter().map(Step::describe).collect::<Vec<_>>(), ["open https://x.test", "press button \"Go\" Enter", "click e5"]);
         assert_eq!(steps[1].request("s", Some("e9".into())).args, ["Enter", "e9"]);
+        let e = Step { cmd: "expect".into(), args: vec!["role".into(), "not".into(), "5000".into(), "alert".into()], target: None, headed: false, engine: None };
+        assert_eq!(e.describe(), "expect --not --role \"alert\"");
         assert!(stop("rec-a", &out).unwrap_err().contains("not recording"));
         let _ = std::fs::remove_dir_all(home);
     }

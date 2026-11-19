@@ -109,9 +109,36 @@ enum Cmd {
         #[command(subcommand)]
         action: RecordCmd,
     },
-    /// Run a recording again, without an agent. Elements are found by role and name, so it
-    /// works across runs. `${NAME}` in the file is replaced by the environment variable NAME.
-    Replay { file: std::path::PathBuf },
+    /// Run recordings again, without an agent. Elements are found by role and name, so it
+    /// works across runs. `${NAME}` in a file is replaced by the environment variable NAME.
+    /// With several files: a session left by a failed one is closed, and a summary is printed.
+    Replay {
+        #[arg(required = true)]
+        files: Vec<std::path::PathBuf>,
+    },
+    /// Test assertion: fail (exit 1) unless the page has this text, URL or element. Looks again
+    /// until it holds or the timeout passes. Recorded, so a replay becomes a test.
+    #[command(group(ArgGroup::new("what").required(true).args(["text", "url", "role"])))]
+    Expect {
+        /// The page text contains this.
+        #[arg(long)]
+        text: Option<String>,
+        /// The URL contains this.
+        #[arg(long)]
+        url: Option<String>,
+        /// An element with this role (button, link, textbox, heading, alert, ...) is on the page.
+        #[arg(long)]
+        role: Option<String>,
+        /// With --role: its exact name.
+        #[arg(long, requires = "role")]
+        name: Option<String>,
+        /// Expect the opposite: the text, URL or element is not there.
+        #[arg(long)]
+        not: bool,
+        /// Give up after this many milliseconds.
+        #[arg(long, default_value_t = 5_000)]
+        timeout: u64,
+    },
     /// Close the session and its browser.
     Close,
     /// Watch what agents do: prints each action here and opens a live page with the screen.
@@ -226,21 +253,23 @@ fn main() -> ExitCode {
                 }
             };
         }
-        Cmd::Replay { file } => {
-            // Read and fill in variables here: the daemon's environment is not the caller's.
-            match std::fs::read_to_string(&file).map_err(|e| format!("could not read {}: {e}", file.display())).and_then(|t| expand_vars(&t)) {
-                Ok(steps) => ("replay", vec![steps]),
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    return ExitCode::FAILURE;
-                }
-            }
+        Cmd::Replay { files } => return replay(&cli.session, &files, cli.json),
+        Cmd::Expect { text, url, role, name, not, timeout } => {
+            let (kind, value) = match (text, url, role) {
+                (Some(t), _, _) => ("text", t),
+                (_, Some(u), _) => ("url", u),
+                (_, _, Some(r)) => ("role", r),
+                _ => unreachable!("clap requires one"),
+            };
+            let mode = if not { "not" } else { "is" };
+            let args = [kind.to_string(), mode.into(), timeout.to_string(), value].into_iter().chain(name).collect();
+            ("expect", args)
         }
         Cmd::Close => ("close", vec![]),
     };
     let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed, engine };
     // Only `open`/`connect` may start a daemon; other commands need an existing session anyway.
-    match send(req, matches!(cmd, "open" | "connect" | "app" | "replay")) {
+    match send(req, matches!(cmd, "open" | "connect" | "app")) {
         Ok(Response { ok, out, notes }) => {
             for n in notes {
                 eprintln!("note: {n}");
@@ -341,6 +370,36 @@ fn open_in_browser(url: &str) {
         "xdg-open"
     };
     let _ = std::process::Command::new(opener).arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+}
+
+/// Replays each file in turn. One file: its output as is. Several: a line per file and a summary.
+fn replay(session: &str, files: &[std::path::PathBuf], json: bool) -> ExitCode {
+    let mut failed = vec![];
+    for file in files {
+        // Read and fill in variables here: the daemon's environment is not the caller's.
+        let steps = std::fs::read_to_string(file).map_err(|e| format!("could not read {}: {e}", file.display())).and_then(|t| expand_vars(&t));
+        let req = |cmd: &str, args| Request { token: String::new(), session: session.into(), cmd: cmd.into(), args, json, headed: false, engine: None };
+        let r = steps.and_then(|s| send(req("replay", vec![s]), true)).and_then(|r| if r.ok { Ok(r.out) } else { Err(r.out) });
+        match &r {
+            Ok(out) if files.len() == 1 => println!("{out}"),
+            Ok(_) => println!("ok      {}", file.display()),
+            Err(e) if files.len() == 1 => eprintln!("error: {e}"),
+            Err(e) => {
+                println!("FAILED  {}
+{}", file.display(), e.lines().map(|l| format!("        {l}")).collect::<Vec<_>>().join("
+"));
+                // The next file starts from a clean session.
+                let _ = send(req("close", vec![]), false);
+            }
+        }
+        if r.is_err() {
+            failed.push(file);
+        }
+    }
+    if files.len() > 1 {
+        println!("{} passed, {} failed", files.len() - failed.len(), failed.len());
+    }
+    if failed.is_empty() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
 /// `${NAME}` -> the value of environment variable NAME, escaped for a JSON string, so secrets

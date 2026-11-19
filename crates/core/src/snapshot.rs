@@ -110,6 +110,11 @@ impl Snapshot {
         crate::diff::flatten(&self.nodes).into_iter().filter(|n| n.r#ref.is_some() && n.role == role && n.name == name).nth(nth)?.r#ref
     }
 
+    /// Whether an element with this role (and exact name, if given) is on the page.
+    pub fn has(&self, role: &str, name: Option<&str>) -> bool {
+        crate::diff::flatten(&self.nodes).iter().any(|n| n.role == role && name.is_none_or(|x| n.name == x))
+    }
+
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("snapshot is always serializable")
     }
@@ -201,6 +206,7 @@ mod tests {
         assert_eq!(s.find("button", "Delete", 1).as_deref(), Some("e9"));
         assert_eq!(s.find("button", "Delete", 2), None);
         assert_eq!(s.locate("e77"), None);
+        assert!(s.has("button", None) && s.has("textbox", Some("Username")) && !s.has("textbox", Some("User")));
     }
 
     #[test]
