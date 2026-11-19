@@ -3,6 +3,7 @@
 pub mod client;
 pub mod ipc;
 pub mod live;
+pub mod replay;
 pub mod router;
 pub mod surface;
 
@@ -146,6 +147,12 @@ fn err(m: impl Into<String>) -> Response {
 
 /// Returns the response and whether the daemon should exit afterwards.
 fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
+    // Recording: name the element before the action changes the page.
+    let target = replay::ref_to_locate(req).and_then(|r| {
+        let s = sessions.lock().unwrap().get(&req.session).cloned()?;
+        let (role, name, nth) = s.lock().unwrap().last_snapshot()?.locate(r)?;
+        Some(replay::Target { role, name, nth })
+    });
     let result = match req.cmd.as_str() {
         "open" => open(req, sessions),
         "connect" => connect(req, sessions),
@@ -170,6 +177,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
         "status" => with_session(req, sessions, |a| Ok(reply(req, a.status(), a.status_json()))),
         "screenshot" => screenshot(req, sessions),
         "wait" => wait(req, sessions),
+        "replay" => replay_steps(req, sessions),
         // The live log, for `klyro watch` (not itself logged).
         "events" => {
             live::mark_watched();
@@ -189,6 +197,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
             let exit = map.is_empty() && !live::watching();
             let resp = to_response(r);
             live::record(req, &resp);
+            replay::push(req, &resp, None);
             live::forget(&req.session);
             return (resp, exit);
         }
@@ -200,6 +209,7 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
     if let Some(s) = &session {
         resp.notes = s.lock().unwrap().take_notes();
     }
+    resp.notes.extend(replay::push(req, &resp, target));
     let seq = live::record(req, &resp);
     // A fresh frame for the live view, only while someone watches (agents pay nothing otherwise).
     if let Some(s) = session.filter(|_| resp.ok && live::watching() && live::changes_view(&req.cmd)) {
@@ -278,6 +288,14 @@ fn app(req: &Request, sessions: &Sessions) -> Result<String, String> {
     let status = surface.status();
     map.insert(req.session.clone(), Arc::new(Mutex::new(surface)));
     Ok(reply(req, format!("{status}\n{}", snap.outline().to_text().trim_end()), json!({ "app": snap.title, "outline": snap.outline() })))
+}
+
+/// args: [the recording's JSON, already read by the caller]. Runs in this session.
+fn replay_steps(req: &Request, sessions: &Sessions) -> Result<String, String> {
+    let steps: Vec<replay::Step> = serde_json::from_str(req.args.first().ok_or("replay needs a recording")?).map_err(|e| format!("not a klyro recording: {e}"))?;
+    let find = |t: &replay::Target| with_session(req, sessions, |a| a.snapshot()).map(|s| s.find(&t.role, &t.name, t.nth));
+    let out = replay::replay(&req.session, &steps, Duration::from_secs(10), find, |r| dispatch(r, sessions).0)?;
+    Ok(reply(req, out, json!({ "replayed": steps.len() })))
 }
 
 /// Text or JSON, as the caller asked.

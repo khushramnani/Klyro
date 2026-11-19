@@ -606,3 +606,38 @@ fn live_view_logs_actions_masks_passwords_and_serves_frames() {
     let printed = k.ok(&["watch", "--once"]);
     assert!(printed.contains("[default] fill") && printed.contains("*****"), "{printed}");
 }
+
+/// Post-MVP item 3: record a flow once, replay it in a new run where every ref differs.
+#[test]
+fn record_then_replay() {
+    let app = demo_app();
+    let k = Klyro::with_engine("replay", "chromium");
+    let file = k.home.join("login.json");
+    let file = file.to_str().unwrap();
+
+    k.ok(&["record", "start"]);
+    k.ok(&["open", &format!("{app}/login")]);
+    let snap = k.ok(&["snapshot"]);
+    k.ok(&["text"]); // reads are not recorded
+    k.ok(&["fill", &ref_of(&snap, "Username"), "demo"]);
+    k.ok(&["fill", &ref_of(&snap, "Password"), "secret"]);
+    k.ok(&["press", "Enter", &ref_of(&snap, "Password")]);
+    k.ok(&["wait", "--url", "/dashboard"]);
+    k.ok(&["close"]);
+    assert!(k.ok(&["record", "stop", file]).contains("saved 6 steps"));
+    let saved = std::fs::read_to_string(file).unwrap();
+    assert!(saved.contains(r#""role": "textbox""#) && !saved.split("\"e").skip(1).any(|t| t.starts_with(|c: char| c.is_ascii_digit())), "refs must not be saved: {saved}");
+
+    // Keep the password out of the file: replay fills it from the environment.
+    std::fs::write(file, saved.replace("\"secret\"", "\"${KLYRO_DEMO_PASS}\"")).unwrap();
+    assert!(k.fails(&["replay", file]).contains("KLYRO_DEMO_PASS"));
+    // SAFETY: tests that spawn klyro take turns (Klyro holds a global lock), and only this one reads it.
+    unsafe { std::env::set_var("KLYRO_DEMO_PASS", "secret") };
+    let out = k.ok(&["replay", file]);
+    assert!(out.contains("3/6 fill textbox \"Password\" secret  ok") && out.ends_with("replayed 6 steps\n"), "{out}");
+
+    // A step that no longer matches the page fails clearly, naming the step.
+    std::fs::write(file, r#"[{"cmd":"open","args":["about:blank"]},{"cmd":"click","target":{"role":"button","name":"Gone"}}]"#).unwrap();
+    let err = k.fails(&["replay", file]);
+    assert!(err.contains("2/2 click button \"Gone\"  FAILED: no button \"Gone\" on the page"), "{err}");
+}

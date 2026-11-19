@@ -42,6 +42,8 @@ see pixels.
 | `connect <port>` | Attach to a running Electron app started with `--remote-debugging-port=<port>` |
 | `app "<window title>"` / `app --launch <program> -- [args]` | Drive a native Windows app (attach to an open window, or start one) |
 | `status` | Which engine the session uses, and any switches |
+| `record start` / `record stop <file.json>` | Save this session's actions as a replayable recording |
+| `replay <file.json>` | Run a recording again (elements found by role and name; `${NAME}` = env var) |
 | `close` | Close the session (an attached app keeps running) |
 | `doctor` | What this machine supports |
 
@@ -68,4 +70,7 @@ Options for any command: `--session <name>` (separate pages and cookies; default
   leaves an attached one running.
 - A human can follow along with `klyro watch` (a live page with the screen and your actions);
   nothing changes for you. `klyro open --headed <url>` shows a real browser window instead.
+- When the user wants a flow they can rerun without you (a smoke test, a daily check), run
+  `klyro record start` before it and `klyro record stop <file>` after, then check it with
+  `klyro replay <file>`. Put secrets in the file as `${NAME}` instead of the real value.
 - Close sessions you no longer need: `klyro close` (and `--session <name>` for others).

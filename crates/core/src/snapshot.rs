@@ -96,6 +96,20 @@ impl Snapshot {
         Snapshot { url: self.url.clone(), title: self.title.clone(), nodes }
     }
 
+    /// A ref as something that survives a reload: (role, name, nth among elements with both).
+    pub fn locate(&self, r: &str) -> Option<(String, String, usize)> {
+        let r = r.trim_start_matches('@');
+        let flat = crate::diff::flatten(&self.nodes);
+        let n = flat.iter().find(|n| n.r#ref.as_deref() == Some(r))?;
+        let nth = flat.iter().take_while(|m| m.r#ref.as_deref() != Some(r)).filter(|m| m.r#ref.is_some() && m.role == n.role && m.name == n.name).count();
+        Some((n.role.clone(), n.name.clone(), nth))
+    }
+
+    /// The reverse of `locate`: the current ref of the nth element with this role and name.
+    pub fn find(&self, role: &str, name: &str, nth: usize) -> Option<String> {
+        crate::diff::flatten(&self.nodes).into_iter().filter(|n| n.r#ref.is_some() && n.role == role && n.name == name).nth(nth)?.r#ref
+    }
+
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).expect("snapshot is always serializable")
     }
@@ -172,6 +186,21 @@ mod tests {
 - alert \"Wrong password\"
 "
         );
+    }
+
+    #[test]
+    fn locate_and_find_round_trip() {
+        let mut b1 = Node::new("button", "Delete");
+        b1.r#ref = Some("e5".into());
+        let mut b2 = Node::new("button", "Delete");
+        b2.r#ref = Some("e9".into());
+        let mut s = sample();
+        s.nodes.extend([b1, b2]);
+        assert_eq!(s.locate("@e9"), Some(("button".into(), "Delete".into(), 1)));
+        assert_eq!(s.locate("e2"), Some(("textbox".into(), "Username".into(), 0)));
+        assert_eq!(s.find("button", "Delete", 1).as_deref(), Some("e9"));
+        assert_eq!(s.find("button", "Delete", 2), None);
+        assert_eq!(s.locate("e77"), None);
     }
 
     #[test]

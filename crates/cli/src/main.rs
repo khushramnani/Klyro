@@ -104,6 +104,14 @@ enum Cmd {
     },
     /// Show the session's lane (engine) and every lane switch with its reason.
     Status,
+    /// Record what this session does (open, click, fill, press, wait, close) to a file.
+    Record {
+        #[command(subcommand)]
+        action: RecordCmd,
+    },
+    /// Run a recording again, without an agent. Elements are found by role and name, so it
+    /// works across runs. `${NAME}` in the file is replaced by the environment variable NAME.
+    Replay { file: std::path::PathBuf },
     /// Close the session and its browser.
     Close,
     /// Watch what agents do: prints each action here and opens a live page with the screen.
@@ -122,6 +130,14 @@ enum Cmd {
     /// Run the background daemon (started automatically).
     #[command(hide = true)]
     Daemon,
+}
+
+#[derive(Subcommand)]
+enum RecordCmd {
+    /// Start recording the session (it need not be open yet).
+    Start,
+    /// Stop recording and save the steps as JSON.
+    Stop { file: std::path::PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -193,14 +209,41 @@ fn main() -> ExitCode {
             ("app", [vec![mode.to_string(), target], args].concat())
         }
         Cmd::Status => ("status", vec![]),
+        // Recordings are files the daemon appends to; starting and saving one needs no daemon.
+        Cmd::Record { action } => {
+            let r = match action {
+                RecordCmd::Start => klyro_daemon::replay::start(&cli.session).map(|_| format!("recording session '{}'; `klyro record stop <file>` saves it", cli.session)),
+                RecordCmd::Stop { file } => klyro_daemon::replay::stop(&cli.session, &file).map(|n| format!("saved {n} steps to {}", file.display())),
+            };
+            return match r {
+                Ok(m) => {
+                    println!("{m}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        Cmd::Replay { file } => {
+            // Read and fill in variables here: the daemon's environment is not the caller's.
+            match std::fs::read_to_string(&file).map_err(|e| format!("could not read {}: {e}", file.display())).and_then(|t| expand_vars(&t)) {
+                Ok(steps) => ("replay", vec![steps]),
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
         Cmd::Close => ("close", vec![]),
     };
     let req = Request { token: String::new(), session: cli.session, cmd: cmd.into(), args, json: cli.json, headed, engine };
     // Only `open`/`connect` may start a daemon; other commands need an existing session anyway.
-    match send(req, matches!(cmd, "open" | "connect" | "app")) {
+    match send(req, matches!(cmd, "open" | "connect" | "app" | "replay")) {
         Ok(Response { ok, out, notes }) => {
             for n in notes {
-                eprintln!("note: switched lane: {n}");
+                eprintln!("note: {n}");
             }
             if ok {
                 println!("{out}");
@@ -298,4 +341,34 @@ fn open_in_browser(url: &str) {
         "xdg-open"
     };
     let _ = std::process::Command::new(opener).arg(url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+}
+
+/// `${NAME}` -> the value of environment variable NAME, escaped for a JSON string, so secrets
+/// stay out of recordings.
+fn expand_vars(text: &str) -> Result<String, String> {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("${") {
+        let end = rest[i..].find('}').ok_or("unclosed ${ in recording")? + i;
+        let name = &rest[i + 2..end];
+        let value = std::env::var(name).map_err(|_| format!("the recording needs environment variable {name}"))?;
+        let quoted = serde_json::to_string(&value).map_err(|e| e.to_string())?;
+        out.push_str(&rest[..i]);
+        out.push_str(&quoted[1..quoted.len() - 1]);
+        rest = &rest[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn expand_vars() {
+        // SAFETY: single-threaded test setting a variable only it reads.
+        unsafe { std::env::set_var("KLYRO_TEST_PW", "a\"b") };
+        assert_eq!(super::expand_vars(r#"["${KLYRO_TEST_PW}", "x"]"#).unwrap(), r#"["a\"b", "x"]"#);
+        assert!(super::expand_vars("${KLYRO_TEST_MISSING}").unwrap_err().contains("KLYRO_TEST_MISSING"));
+        assert!(super::expand_vars("${oops").is_err());
+    }
 }

@@ -30,6 +30,22 @@ lane, which has no pixels, the page shows the session's last text output instead
 `klyro watch --no-open` prints the link without opening a browser; `--once` prints what has
 happened so far and exits.
 
+## Record and replay
+
+Let an agent work a flow out once, then run it again with no model:
+
+```
+klyro record start
+klyro open example.com/login      # ...the agent's fills, clicks, presses and waits
+klyro record stop login.json
+klyro replay login.json           # later, in CI or a cron job
+```
+
+The recording is JSON, one step per command. Elements are saved by role and name, not by
+ref, so replay finds them again on a fresh page (waiting up to 10 s for each to appear) and
+stops at the first step that fails, naming it. Typed text is saved as typed: replace a
+password with `${NAME}` and replay fills it from that environment variable.
+
 ## Desktop apps (Windows)
 
 `klyro app "Calculator"` attaches to an open window by title; `klyro app --launch <program> -- [args]`

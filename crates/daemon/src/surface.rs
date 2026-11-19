@@ -37,10 +37,10 @@ impl Surface {
         }
     }
 
-    /// Lane switches since the last call (web only).
+    /// Notes for the caller: lane switches since the last call (web only).
     pub fn take_notes(&mut self) -> Vec<String> {
         match self {
-            Surface::Web(r) => r.take_notes(),
+            Surface::Web(r) => r.take_notes().into_iter().map(|n| format!("switched lane: {n}")).collect(),
             Surface::App(_) => vec![],
         }
     }

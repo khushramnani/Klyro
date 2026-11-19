@@ -131,7 +131,7 @@ fn run(name: &str, a: &Value) -> Result<Vec<Value>, String> {
     let resp = send(req, matches!(name, "open" | "connect" | "app"))?;
     let mut text = resp.out;
     for n in &resp.notes {
-        text.push_str(&format!("\nnote: switched lane: {n}"));
+        text.push_str(&format!("\nnote: {n}"));
     }
     if !resp.ok {
         return Err(text);
