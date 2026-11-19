@@ -408,7 +408,7 @@ impl Adapter for WebPage {
 
 #[cfg(test)]
 mod tests {
-    use super::base64_decode;
+    use super::{base64_decode, base64_encode};
 
     #[test]
     fn base64() {
