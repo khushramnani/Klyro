@@ -1,6 +1,8 @@
 //! `klyro`: thin CLI. Sends one request to the daemon, starting it if needed.
 
 mod doctor;
+mod render;
+mod view;
 
 use clap::{ArgGroup, Parser, Subcommand};
 use klyro_daemon::client::send;
@@ -155,6 +157,19 @@ enum Cmd {
         #[command(subcommand)]
         pack: CheckCmd,
     },
+    /// Show the session's screen live in this terminal (sixel or coloured blocks). q quits;
+    /// on the fast lane it shows text, and v moves the session to Chromium.
+    View {
+        /// blocks (any terminal) or sixel (Windows Terminal, WezTerm, foot). Default: detected.
+        #[arg(long)]
+        render: Option<String>,
+        /// Print one frame and exit (works without a terminal, e.g. in a pipe).
+        #[arg(long)]
+        once: bool,
+        /// Size in cells to draw for when there is no terminal, e.g. 100x30.
+        #[arg(long, value_name = "COLSxROWS")]
+        size: Option<String>,
+    },
     /// Check which engines this machine has, and the daemon.
     Doctor,
     /// Serve the same commands as MCP tools over stdio (for MCP clients).
@@ -198,6 +213,19 @@ fn main() -> ExitCode {
             };
         }
         Cmd::Doctor => return doctor::run(cli.json),
+        Cmd::View { render, once, size } => {
+            let render = match render.as_deref() {
+                None => None,
+                Some("blocks") => Some(view::Render::Blocks),
+                Some("sixel") => Some(view::Render::Sixel),
+                Some(r) => {
+                    eprintln!("error: --render is blocks or sixel, not {r}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let size = size.and_then(|s| s.split_once('x').and_then(|(c, r)| Some((c.parse().ok()?, r.parse().ok()?))));
+            return view::run(view::Opts { session: cli.session, render, once, size });
+        }
         Cmd::Watch { no_open, once } => return watch(no_open, once, cli.json),
         Cmd::Mcp => {
             return match klyro_mcp::serve(std::io::stdin().lock(), std::io::stdout().lock()) {

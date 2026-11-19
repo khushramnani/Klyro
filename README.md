@@ -66,6 +66,16 @@ screen-reader-only text, text truncated with an ellipsis) are not reported.
 
 Both exit 1 when they find something, so they work as steps in a replay.
 
+## View a session in the terminal
+
+`klyro view` shows a session's screen live in your terminal, next to the agent: sixel images
+in Windows Terminal, WezTerm and foot, coloured blocks anywhere else (`--render blocks|sixel`).
+It is the agent's own session, so you see exactly what it sees; it works for web pages, Windows
+apps and documents. On the fast lane, which has no pixels, it shows the page text; press `v`
+to move the session to Chromium (the page reloads). `q` quits. `klyro view --once` prints a
+single frame. Frames are fetched one at a time and back off when the browser is busy, so a
+viewer barely slows the agent.
+
 ## Desktop apps (Windows)
 
 `klyro app "Calculator"` attaches to an open window by title; `klyro app --launch <program> -- [args]`
