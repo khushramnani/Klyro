@@ -51,6 +51,14 @@ To make a recording a test, add assertions while recording. `klyro expect --text
 with exit code 1 unless the check holds within 5 s. `klyro replay *.json` runs a suite: one
 line per file, a summary, and exit code 1 if any failed.
 
+## Checks
+
+`klyro check a11y` lists accessibility problems on the current page: controls without a name,
+images without alt text, heading levels that skip, no level-1 heading. It reads the
+accessibility tree, so it also works on Windows apps; web pages move to Chromium, whose tree
+is complete. It exits 1 when it finds something, so it works as a step in a replay. Colour
+contrast is not checked.
+
 ## Desktop apps (Windows)
 
 `klyro app "Calculator"` attaches to an open window by title; `klyro app --launch <program> -- [args]`

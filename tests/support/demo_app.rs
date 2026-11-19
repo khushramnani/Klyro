@@ -5,6 +5,15 @@ use std::net::TcpListener;
 
 const LOGIN: &str = include_str!("../fixtures/demo-app/login.html");
 const DASHBOARD: &str = include_str!("../fixtures/demo-app/dashboard.html");
+/// One of each accessibility problem the a11y pack finds.
+const A11Y_BROKEN: &str = r#"<!doctype html><title>Broken</title>
+<h2>Shop</h2>
+<a href="/"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a>
+<button><svg width="10" height="10"></svg></button>
+<input type="text">
+<h4>Details</h4>
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Logo">
+<button>Buy</button>"#;
 
 /// Demo app on 127.0.0.1: `/login` (POST demo/secret sets a cookie and redirects to
 /// `/dashboard`), `/dashboard` (needs the cookie). Returns the base URL.
@@ -39,6 +48,7 @@ pub fn demo_app() -> String {
                 }
                 (Some("POST"), "/login") => html(&LOGIN.replace("<!--ERROR-->", "<p role=\"alert\">Wrong username or password</p>")),
                 (_, "/dashboard") if cookie.contains("sid=ok") => html(DASHBOARD),
+                (_, "/a11y-broken") => html(A11Y_BROKEN),
                 (_, "/long") => html("<!doctype html><title>Long</title><h1>Top</h1><div style=\"height:3000px\"></div><p>Bottom</p>"),
                 (_, "/dashboard") => "HTTP/1.1 303 See Other\r\nLocation: /login\r\nContent-Length: 0\r\n\r\n".to_string(),
                 _ => html(LOGIN),

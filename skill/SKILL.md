@@ -45,6 +45,7 @@ see pixels.
 | `record start` / `record stop <file.json>` | Save this session's actions as a replayable recording |
 | `replay <file.json>` | Run a recording again (elements found by role and name; `${NAME}` = env var) |
 | `expect --text <t>` / `--url <part>` / `--role <r> [--name <n>]` `[--not]` | Test assertion; exits 1 if it doesn't hold. Recorded |
+| `check a11y` | List accessibility problems (unnamed controls, images without alt, heading jumps); exits 1 if any |
 | `close` | Close the session (an attached app keeps running) |
 | `doctor` | What this machine supports |
 

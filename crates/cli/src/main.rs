@@ -150,6 +150,11 @@ enum Cmd {
         #[arg(long)]
         once: bool,
     },
+    /// Check the page for problems; exits 1 and lists them if any are found. Recorded.
+    Check {
+        #[command(subcommand)]
+        pack: CheckCmd,
+    },
     /// Check which engines this machine has, and the daemon.
     Doctor,
     /// Serve the same commands as MCP tools over stdio (for MCP clients).
@@ -157,6 +162,12 @@ enum Cmd {
     /// Run the background daemon (started automatically).
     #[command(hide = true)]
     Daemon,
+}
+
+#[derive(Subcommand)]
+enum CheckCmd {
+    /// Accessibility: controls without a name, images without alt text, heading levels that skip.
+    A11y,
 }
 
 #[derive(Subcommand)]
@@ -236,6 +247,7 @@ fn main() -> ExitCode {
             ("app", [vec![mode.to_string(), target], args].concat())
         }
         Cmd::Status => ("status", vec![]),
+        Cmd::Check { pack: CheckCmd::A11y } => ("check", vec!["a11y".into()]),
         // Recordings are files the daemon appends to; starting and saving one needs no daemon.
         Cmd::Record { action } => {
             let r = match action {

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 /// Commands worth replaying: changes, waits and test assertions. Reads (snapshot, text,
 /// status) change nothing.
-const RECORDED: &[&str] = &["open", "connect", "app", "click", "fill", "press", "wait", "expect", "close"];
+const RECORDED: &[&str] = &["open", "connect", "app", "click", "fill", "press", "wait", "expect", "check", "close"];
 
 /// Appends to recording files take turns.
 static WRITE: Mutex<()> = Mutex::new(());

@@ -45,6 +45,14 @@ impl Surface {
         }
     }
 
+    /// Web: be on the visual lane (see `Router::need_chromium`). Apps have one lane.
+    pub fn need_chromium(&mut self, what: &'static str) -> Result<()> {
+        match self {
+            Surface::Web(r) => r.need_chromium(what),
+            Surface::App(_) => Ok(()),
+        }
+    }
+
     pub fn status(&self) -> String {
         match self {
             Surface::Web(r) => r.status(),

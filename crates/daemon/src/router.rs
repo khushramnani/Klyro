@@ -94,6 +94,18 @@ impl Router {
         s
     }
 
+    /// Moves to the visual lane, for checks the fast lane can't answer fully (layout; its
+    /// accessibility tree leaves out images without alt text).
+    pub fn need_chromium(&mut self, what: &'static str) -> Result<()> {
+        if self.lane().has_layout() {
+            return Ok(());
+        }
+        if !self.can_switch() {
+            return Err(Error::Unsupported(what));
+        }
+        self.switch(&format!("{what} needs it"))
+    }
+
     fn can_switch(&self) -> bool {
         self.auto && self.lane() == Engine::Lightpanda
     }

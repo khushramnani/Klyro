@@ -679,3 +679,29 @@ fn expect_and_replay_suite() {
     assert!(out.contains("FAILED  ") && out.contains("text \"Nope\": not found"), "{out}");
     assert!(out.contains("ok      ") && out.trim_end().ends_with("1 passed, 1 failed"), "{out}");
 }
+
+/// Task 16: the accessibility pack, on automatic lanes (the fast lane's tree drops images
+/// without alt text, so the check moves to Chromium).
+#[test]
+fn a11y_check() {
+    let app = demo_app();
+    let k = Klyro::with_engine("a11y", "");
+    k.ok(&["open", &format!("{app}/a11y-broken")]);
+    let err = k.fails(&["check", "a11y"]);
+    for p in [
+        "6 accessibility problems:",
+        "- image (in link [ref=",
+        "- button [ref=e3] has no name",
+        "- textbox [ref=e4] has no name",
+        "- heading \"Details\" [ref=e5] jumps from level 2 to 4",
+        "- the page has headings but no level-1 heading",
+    ] {
+        assert!(err.contains(p), "missing {p:?} in:\n{err}");
+    }
+    let (ok, _, err) = k.run(&["check", "a11y", "--json"]);
+    let j: serde_json::Value = serde_json::from_str(err.trim().trim_start_matches("error: ")).unwrap();
+    assert!(!ok && j["problems"].as_array().unwrap().len() == 6, "{err}");
+
+    k.ok(&["open", &format!("{app}/login")]);
+    assert_eq!(k.ok(&["check", "a11y"]).trim(), "no accessibility problems found");
+}
