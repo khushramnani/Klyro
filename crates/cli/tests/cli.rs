@@ -742,3 +742,50 @@ fn layout_check() {
     let err = k.fails(&["replay", file.to_str().unwrap()]);
     assert!(err.contains("2/4 check a11y  ok") && err.contains("4/4 check layout 375  FAILED: 3 layout problems at 375px wide"), "{err}");
 }
+
+/// Sends one raw daemon request for this test's daemon (commands the CLI has no verb for).
+fn daemon(k: &Klyro, cmd: &str, args: &[&str]) -> klyro_daemon::ipc::Response {
+    // SAFETY: browser tests take turns (Klyro holds a global lock); children get KLYRO_HOME explicitly anyway.
+    unsafe { std::env::set_var("KLYRO_HOME", &k.home) };
+    let req = klyro_daemon::ipc::Request { token: String::new(), session: "default".into(), cmd: cmd.into(), args: args.iter().map(|a| a.to_string()).collect(), json: true, headed: false, engine: None };
+    klyro_daemon::client::send(req, false).unwrap()
+}
+
+/// Task 18: frames sized for a terminal, and a human's click and keys at page coordinates.
+#[test]
+fn view_frame_and_input() {
+    let app = demo_app();
+    let k = Klyro::with_engine("view", "chromium");
+    k.ok(&["open", &format!("{app}/login")]);
+    let r = daemon(&k, "view-frame", &["640"]);
+    let v: serde_json::Value = serde_json::from_str(&r.out).unwrap_or_else(|_| panic!("{}", r.out));
+    let png = klyro_adapter_web::base64_decode(v["png"].as_str().unwrap()).unwrap();
+    let be = |i: usize| u32::from_be_bytes(png[i..i + 4].try_into().unwrap());
+    assert_eq!((&png[1..4], be(16), be(20)), (&b"PNG"[..], 640, 400), "scaled in the browser");
+    assert_eq!((v["w"].as_u64(), v["h"].as_u64()), (Some(1280), Some(800)), "CSS viewport, for mapping clicks");
+
+    // The Username box sits at about (165, 90) on the demo login page.
+    assert!(daemon(&k, "view-input", &["click", "165", "90"]).ok);
+    for key in ["d", "e", "m", "o"] {
+        assert!(daemon(&k, "view-input", &["key", key]).ok);
+    }
+    let snap = k.ok(&["snapshot"]);
+    assert!(snap.contains("textbox \"Username\"") && snap.contains("[value=\"demo\"]"), "{snap}");
+    assert!(!daemon(&k, "view-input", &["jump"]).ok);
+    // Not logged: `watch` must never show frames or typed keys.
+    let log = k.ok(&["watch", "--once", "--json"]);
+    assert!(!log.contains("view-"), "{log}");
+}
+
+#[test]
+fn view_frame_on_fast_lane_is_text() {
+    if !have_lightpanda() {
+        return;
+    }
+    let app = demo_app();
+    let k = Klyro::with_engine("view-fast", "lightpanda");
+    k.ok(&["open", &format!("{app}/login")]);
+    let v: serde_json::Value = serde_json::from_str(&daemon(&k, "view-frame", &["640"]).out).unwrap();
+    assert!(v["text"].as_str().unwrap().contains("Sign in") && v["png"].is_null(), "{v}");
+    assert!(k.ok(&["status"]).contains("lightpanda"), "no lane switch");
+}

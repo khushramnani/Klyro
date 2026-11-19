@@ -61,6 +61,34 @@ impl Surface {
         }
     }
 
+    /// `klyro view`: (PNG, width, height in the coordinates input uses). Web frames are scaled
+    /// down to `max_width` in the browser; app frames come at full size.
+    pub fn view_frame(&mut self, max_width: u32) -> Result<(Vec<u8>, u32, u32)> {
+        match self {
+            Surface::Web(r) => r.view_frame(max_width),
+            Surface::App(a) => {
+                let png = a.frame().ok_or(klyro_core::Error::Unsupported("the live view of this window"))?;
+                let be = |i: usize| png.get(i..i + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap())).unwrap_or(0);
+                let (w, h) = (be(16), be(20));
+                Ok((png, w, h))
+            }
+        }
+    }
+
+    pub fn view_pointer(&mut self, p: &klyro_adapter_web::Pointer) -> Result<()> {
+        match self {
+            Surface::Web(r) => r.view_pointer(p),
+            Surface::App(_) => Err(klyro_core::Error::Unsupported("input in the live view of an app (it is view-only)")),
+        }
+    }
+
+    pub fn view_key(&mut self, spec: &str) -> Result<()> {
+        match self {
+            Surface::Web(r) => r.view_key(spec),
+            Surface::App(_) => Err(klyro_core::Error::Unsupported("input in the live view of an app (it is view-only)")),
+        }
+    }
+
     pub fn status(&self) -> String {
         match self {
             Surface::Web(r) => r.status(),

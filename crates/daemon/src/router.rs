@@ -112,6 +112,19 @@ impl Router {
         self.page.layout_problems(width)
     }
 
+    /// `klyro view`: never switches lanes (the agent is working); see `need_chromium`.
+    pub fn view_frame(&mut self, max_width: u32) -> Result<(Vec<u8>, u32, u32)> {
+        self.page.view_frame(max_width)
+    }
+
+    pub fn view_pointer(&mut self, p: &klyro_adapter_web::Pointer) -> Result<()> {
+        self.page.view_pointer(p)
+    }
+
+    pub fn view_key(&mut self, spec: &str) -> Result<()> {
+        self.page.view_key(spec)
+    }
+
     fn can_switch(&self) -> bool {
         self.auto && self.lane() == Engine::Lightpanda
     }

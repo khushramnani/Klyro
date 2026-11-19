@@ -148,7 +148,7 @@ impl WebPage {
         Ok(())
     }
 
-    fn press(&mut self, spec: &str) -> Result<()> {
+    pub(crate) fn press(&mut self, spec: &str) -> Result<()> {
         let k = keys::parse(spec).map_err(Error::Invalid)?;
         let down = if k.text.is_some() { "keyDown" } else { "rawKeyDown" };
         for t in [down, "keyUp"] {
@@ -198,7 +198,20 @@ impl WebPage {
 }
 
 /// Standard base64 (CDP binary payloads). Ignores whitespace; None on bad input.
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
+/// Standard base64 with padding.
+pub fn base64_encode(bytes: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
+}
+
+pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| match c {
         b'A'..=b'Z' => Some(c - b'A'),
         b'a'..=b'z' => Some(c - b'a' + 26),
@@ -404,5 +417,9 @@ mod tests {
         assert_eq!(base64_decode("YWJj").unwrap(), b"abc");
         assert_eq!(base64_decode("iVBO\nRw0K").unwrap(), [0x89, b'P', b'N', b'G', 0x0d, 0x0a]);
         assert!(base64_decode("a!b=").is_none());
+        for s in [&b""[..], b"h", b"hi", b"hello", &[0x89, 0, 255, 7]] {
+            assert_eq!(base64_decode(&base64_encode(s)).unwrap(), s);
+        }
+        assert_eq!(base64_encode(b"hi"), "aGk=");
     }
 }

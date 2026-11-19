@@ -195,6 +195,8 @@ fn dispatch(req: &Request, sessions: &Sessions) -> (Response, bool) {
         "replay" => replay_steps(req, sessions),
         "expect" => expect(req, sessions),
         "check" => check(req, sessions),
+        // `klyro view`: frames and a human's input. Not logged: no images or typed keys in `watch`.
+        "view-frame" | "view-input" => return (to_response(view(req, sessions)), false),
         // The live log, for `klyro watch` (not itself logged).
         "events" => {
             live::mark_watched();
@@ -369,6 +371,31 @@ fn check(req: &Request, sessions: &Sessions) -> Result<String, String> {
         0 => Ok(format!("no {kind} problems found{at}")),
         n => Err(format!("{n} {kind} problem{}{at}:\n{}", if n == 1 { "" } else { "s" }, problems.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n"))),
     }
+}
+
+/// view-frame [max_width] -> {"png", "w", "h"}, or {"text"} on a lane without pixels.
+/// view-input click|move x y | wheel x y dy | key <spec> | visual (move to Chromium).
+fn view(req: &Request, sessions: &Sessions) -> Result<String, String> {
+    use klyro_adapter_web::Pointer;
+    let num = |i: usize| req.args.get(i).and_then(|a| a.parse::<f64>().ok()).ok_or("view-input needs numbers");
+    let s = sessions.lock().unwrap().get(&req.session).cloned().ok_or_else(|| no_session(&req.session))?;
+    let mut a = s.lock().unwrap();
+    let r = match (req.cmd.as_str(), req.args.first().map(String::as_str)) {
+        ("view-frame", w) => match a.view_frame(w.and_then(|w| w.parse().ok()).unwrap_or(1280)) {
+            Ok((png, w, h)) => Ok(json!({ "png": klyro_adapter_web::base64_encode(&png), "w": w, "h": h })),
+            // The fast lane has no pixels: show what it reads instead.
+            Err(klyro_core::Error::Unsupported(_)) => a.text().map(|t| json!({ "text": t, "status": a.status() })),
+            Err(e) => Err(e),
+        },
+        (_, Some("click")) => a.view_pointer(&Pointer::Click { x: num(1)?, y: num(2)? }).map(|_| json!({})),
+        (_, Some("move")) => a.view_pointer(&Pointer::Move { x: num(1)?, y: num(2)? }).map(|_| json!({})),
+        (_, Some("wheel")) => a.view_pointer(&Pointer::Wheel { x: num(1)?, y: num(2)?, dy: num(3)? }).map(|_| json!({})),
+        (_, Some("key")) => a.view_key(req.args.get(1).ok_or("view-input key needs a key")?).map(|_| json!({})),
+        // The switch note stays for the agent's next command: the page reloaded under it.
+        (_, Some("visual")) => a.need_chromium("the live view").map(|_| json!({})),
+        _ => return Err("view-input needs click, move, wheel, key or visual".into()),
+    };
+    r.map(|v| v.to_string()).map_err(|e| e.to_string())
 }
 
 /// args: [the recording's JSON, already read by the caller]. Runs in this session.
