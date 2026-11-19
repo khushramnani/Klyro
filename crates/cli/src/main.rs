@@ -168,6 +168,12 @@ enum Cmd {
 enum CheckCmd {
     /// Accessibility: controls without a name, images without alt text, heading levels that skip.
     A11y,
+    /// Layout (web): sideways scrolling, controls covered or cut off, text cut off.
+    Layout {
+        /// Check at this viewport width in pixels (e.g. 375 for a phone); restored afterwards.
+        #[arg(long)]
+        width: Option<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -248,6 +254,7 @@ fn main() -> ExitCode {
         }
         Cmd::Status => ("status", vec![]),
         Cmd::Check { pack: CheckCmd::A11y } => ("check", vec!["a11y".into()]),
+        Cmd::Check { pack: CheckCmd::Layout { width } } => ("check", ["layout".to_string()].into_iter().chain(width.map(|w| w.to_string())).collect()),
         // Recordings are files the daemon appends to; starting and saving one needs no daemon.
         Cmd::Record { action } => {
             let r = match action {
@@ -397,9 +404,7 @@ fn replay(session: &str, files: &[std::path::PathBuf], json: bool) -> ExitCode {
             Ok(_) => println!("ok      {}", file.display()),
             Err(e) if files.len() == 1 => eprintln!("error: {e}"),
             Err(e) => {
-                println!("FAILED  {}
-{}", file.display(), e.lines().map(|l| format!("        {l}")).collect::<Vec<_>>().join("
-"));
+                println!("FAILED  {}\n{}", file.display(), e.lines().map(|l| format!("        {l}")).collect::<Vec<_>>().join("\n"));
                 // The next file starts from a clean session.
                 let _ = send(req("close", vec![]), false);
             }

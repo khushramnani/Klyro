@@ -17,6 +17,8 @@ pub struct WebPage {
     pub(crate) cdp: Cdp,
     pub(crate) refs: RefMap<Handle>,
     main_frame: String,
+    /// The viewport we set at launch; None means the window's own size (headed, attached).
+    viewport: Option<(u32, u32)>,
     // Declared last so the connection closes before the process is stopped.
     // None when attached to a program we did not start (an Electron app): never stop it.
     _proc: Option<Proc>,
@@ -34,17 +36,27 @@ impl WebPage {
         if engine.has_layout() {
             cdp.call("Page.bringToFront", json!({}))?;
         }
-        if engine.has_layout() && !headed {
-            // Exact desktop viewport; the headless default is cramped. Headed keeps the user's window.
-            cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": 1280, "height": 800, "deviceScaleFactor": 1, "mobile": false }))?;
-        }
-        let main_frame = cdp.call("Page.getFrameTree", json!({}))?["frameTree"]["frame"]["id"].as_str().unwrap_or("").to_string();
-        Ok(Self { engine, cdp, refs: RefMap::new(), main_frame, _proc: Some(proc) })
+        // Exact desktop viewport; the headless default is cramped. Headed keeps the user's window.
+        let viewport = (engine.has_layout() && !headed).then_some((1280, 800));
+        let mut page = Self { engine, cdp, refs: RefMap::new(), main_frame: String::new(), viewport, _proc: Some(proc) };
+        page.restore_viewport()?;
+        page.main_frame = page.cdp.call("Page.getFrameTree", json!({}))?["frameTree"]["frame"]["id"].as_str().unwrap_or("").to_string();
+        Ok(page)
+    }
+
+    /// Back to the launch viewport (or the window's own size), e.g. after checking another width.
+    pub(crate) fn restore_viewport(&mut self) -> Result<()> {
+        match self.viewport {
+            Some((w, h)) => self.cdp.call("Emulation.setDeviceMetricsOverride", json!({ "width": w, "height": h, "deviceScaleFactor": 1, "mobile": false }))?,
+            None if self.engine.has_layout() => self.cdp.call("Emulation.clearDeviceMetricsOverride", json!({}))?,
+            None => return Ok(()),
+        };
+        Ok(())
     }
 
     /// Wraps a CDP session already attached to someone else's page (see `attach`).
     pub(crate) fn attached(cdp: Cdp, main_frame: String) -> Self {
-        Self { engine: Engine::Chromium, cdp, refs: RefMap::new(), main_frame, _proc: None }
+        Self { engine: Engine::Chromium, cdp, refs: RefMap::new(), main_frame, viewport: None, _proc: None }
     }
 
     /// A JPEG of the viewport for the live view; None on engines without pixels. Never

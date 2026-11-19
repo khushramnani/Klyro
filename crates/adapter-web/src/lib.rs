@@ -8,6 +8,7 @@ mod chromium;
 mod engine;
 mod handoff;
 mod keys;
+mod layout;
 mod lightpanda;
 mod page;
 

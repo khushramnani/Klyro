@@ -705,3 +705,40 @@ fn a11y_check() {
     k.ok(&["open", &format!("{app}/login")]);
     assert_eq!(k.ok(&["check", "a11y"]).trim(), "no accessibility problems found");
 }
+
+/// Task 17: the layout pack. Finds real problems, ignores deliberate tricks (skip link,
+/// screen-reader text, ellipsis), checks another width and puts the viewport back.
+#[test]
+fn layout_check() {
+    let app = demo_app();
+    let k = Klyro::with_engine("layout", "");
+    k.ok(&["open", &format!("{app}/layout-broken")]);
+    let err = k.fails(&["check", "layout"]);
+    assert!(err.contains("4 layout problems at 1280px wide:"), "{err}");
+    for p in [
+        "the page is 1600px wide in a 1280px viewport, so it scrolls sideways (sticking out: div.wide)",
+        "button \"Buy\" is covered by div \"Cookies!\"",
+        "button \"Menu\" is cut off by the edge of the page",
+        "text is cut off in p \"This sentence",
+    ] {
+        assert!(err.contains(p), "missing {p:?} in:\n{err}");
+    }
+    let err = k.fails(&["check", "layout", "--width", "375"]);
+    assert!(err.contains("3 layout problems at 375px wide:") && !err.contains("sideways"), "{err}");
+    assert!(k.ok(&["screenshot", k.home.join("v.png").to_str().unwrap()]).contains("(1280x800,"), "viewport restored");
+
+    k.ok(&["open", &format!("{app}/login")]);
+    assert_eq!(k.ok(&["check", "layout"]).trim(), "no layout problems found at 1280px wide");
+
+    // Checks are replay steps: a recording fails where the page does.
+    let file = k.home.join("checks.json");
+    let steps = serde_json::json!([
+        { "cmd": "open", "args": [format!("{app}/login")] },
+        { "cmd": "check", "args": ["a11y"] },
+        { "cmd": "open", "args": [format!("{app}/layout-broken")] },
+        { "cmd": "check", "args": ["layout", "375"] },
+    ]);
+    std::fs::write(&file, steps.to_string()).unwrap();
+    let err = k.fails(&["replay", file.to_str().unwrap()]);
+    assert!(err.contains("2/4 check a11y  ok") && err.contains("4/4 check layout 375  FAILED: 3 layout problems at 375px wide"), "{err}");
+}

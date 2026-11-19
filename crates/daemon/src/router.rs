@@ -106,6 +106,12 @@ impl Router {
         self.switch(&format!("{what} needs it"))
     }
 
+    /// Layout pack: (viewport width, problems), on the visual lane.
+    pub fn layout(&mut self, width: Option<u32>) -> Result<(u32, Vec<String>)> {
+        self.need_chromium("the layout check")?;
+        self.page.layout_problems(width)
+    }
+
     fn can_switch(&self) -> bool {
         self.auto && self.lane() == Engine::Lightpanda
     }

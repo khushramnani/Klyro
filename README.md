@@ -56,8 +56,15 @@ line per file, a summary, and exit code 1 if any failed.
 `klyro check a11y` lists accessibility problems on the current page: controls without a name,
 images without alt text, heading levels that skip, no level-1 heading. It reads the
 accessibility tree, so it also works on Windows apps; web pages move to Chromium, whose tree
-is complete. It exits 1 when it finds something, so it works as a step in a replay. Colour
-contrast is not checked.
+is complete. Colour contrast is not checked.
+
+`klyro check layout` (web pages, on Chromium) lists what only a layout engine sees: a page that
+scrolls sideways (and what sticks out), controls covered by another element or cut off by
+the page edge, and text cut off by its box. `--width 375` checks a phone-sized viewport and
+puts the viewport back afterwards. Deliberate tricks (skip links parked off-screen,
+screen-reader-only text, text truncated with an ellipsis) are not reported.
+
+Both exit 1 when they find something, so they work as steps in a replay.
 
 ## Desktop apps (Windows)
 

@@ -53,6 +53,14 @@ impl Surface {
         }
     }
 
+    /// Layout pack: web pages only.
+    pub fn layout(&mut self, width: Option<u32>) -> Result<(u32, Vec<String>)> {
+        match self {
+            Surface::Web(r) => r.layout(width),
+            Surface::App(_) => Err(klyro_core::Error::Unsupported("the layout check")),
+        }
+    }
+
     pub fn status(&self) -> String {
         match self {
             Surface::Web(r) => r.status(),

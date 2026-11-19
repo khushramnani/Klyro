@@ -343,25 +343,31 @@ fn expect(req: &Request, sessions: &Sessions) -> Result<String, String> {
     }
 }
 
-/// Checks packs: args ["a11y"]. Problems found fail the command, so a replay stops there.
+/// Check packs: args ["a11y"] or ["layout", width?]. Problems found fail the command, so a
+/// replay stops there.
 fn check(req: &Request, sessions: &Sessions) -> Result<String, String> {
-    let problems = match req.args.first().map(String::as_str) {
-        Some("a11y") => with_session(req, sessions, |a| {
-            a.need_chromium("the accessibility check")?;
-            a.snapshot()
-        })
-        .map(|s| klyro_core::a11y(&s))?,
-        _ => return Err("check needs a11y".into()),
+    let (kind, at, problems) = match req.args.first().map(String::as_str) {
+        Some("a11y") => {
+            let s = with_session(req, sessions, |a| {
+                a.need_chromium("the accessibility check")?;
+                a.snapshot()
+            })?;
+            ("accessibility", String::new(), klyro_core::a11y(&s))
+        }
+        Some("layout") => {
+            let width = req.args.get(1).map(|w| w.parse().map_err(|_| format!("bad width {w}"))).transpose()?;
+            let (w, problems) = with_session(req, sessions, |a| a.layout(width))?;
+            ("layout", format!(" at {w}px wide"), problems)
+        }
+        _ => return Err("check needs a11y or layout".into()),
     };
     if req.json {
         let j = json!({ "problems": problems }).to_string();
         return if problems.is_empty() { Ok(j) } else { Err(j) };
     }
     match problems.len() {
-        0 => Ok("no accessibility problems found".into()),
-        n => Err(format!("{n} accessibility problem{}:
-{}", if n == 1 { "" } else { "s" }, problems.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("
-"))),
+        0 => Ok(format!("no {kind} problems found{at}")),
+        n => Err(format!("{n} {kind} problem{}{at}:\n{}", if n == 1 { "" } else { "s" }, problems.iter().map(|p| format!("- {p}")).collect::<Vec<_>>().join("\n"))),
     }
 }
 
