@@ -21,6 +21,8 @@ pub struct Cdp {
     /// Sent with every call once attached to a page.
     pub session: Option<String>,
     events: VecDeque<Value>,
+    /// Calls we stopped waiting for that the browser may still be running.
+    abandoned: Vec<u64>,
 }
 
 impl Cdp {
@@ -35,7 +37,7 @@ impl Cdp {
         // After the handshake: short read timeout so waits can check their deadline;
         // tungstenite buffers partial frames across timeouts.
         ws.get_ref().set_read_timeout(Some(Duration::from_millis(200))).map_err(engine_err)?;
-        Ok(Self { ws, next: 0, session: None, events: VecDeque::new() })
+        Ok(Self { ws, next: 0, session: None, events: VecDeque::new(), abandoned: vec![] })
     }
 
     /// One message, or None on read timeout.
@@ -61,6 +63,17 @@ impl Cdp {
 
     /// Like `call`, with its own deadline. A reply that arrives later is ignored.
     pub fn call_timeout(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+        let end = Instant::now() + timeout;
+        // Chrome can stall a call sent while an abandoned one still runs (a live-view frame
+        // that timed out, then a screenshot): give those a few seconds to finish first. A reply
+        // may never come (the page went away), so then forget them rather than wait every time.
+        let drain = (Instant::now() + Duration::from_secs(5)).min(end);
+        while !self.abandoned.is_empty() && Instant::now() < drain {
+            if let Some(v) = self.read()? {
+                self.note(v);
+            }
+        }
+        self.abandoned.clear();
         self.next += 1;
         let id = self.next;
         let mut msg = json!({ "id": id, "method": method, "params": params });
@@ -68,7 +81,6 @@ impl Cdp {
             msg["sessionId"] = json!(s);
         }
         self.ws.send(Message::text(msg.to_string())).map_err(engine_err)?;
-        let end = Instant::now() + timeout;
         while Instant::now() < end {
             let Some(v) = self.read()? else { continue };
             if v["id"] == id {
@@ -77,11 +89,19 @@ impl Cdp {
                     None => Ok(v["result"].clone()),
                 };
             }
-            if v.get("method").is_some() {
-                self.keep_event(v);
-            }
+            self.note(v);
         }
+        self.abandoned.push(id);
         Err(Error::Engine(format!("{method}: timed out")))
+    }
+
+    /// A message that is not the reply being waited for: an event, or a late reply.
+    fn note(&mut self, v: Value) {
+        if v.get("method").is_some() {
+            self.keep_event(v);
+        } else if let Some(id) = v["id"].as_u64() {
+            self.abandoned.retain(|a| *a != id);
+        }
     }
 
     /// Drop buffered events, so a following wait only sees new ones.
